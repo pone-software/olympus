@@ -345,6 +345,7 @@ def make_generate_photons_nn(model_path):
             pdf_params, sources, module_coords, module_efficiencies, time_geo
         )
 
+        all_times_det = ak.sort(ak.Array(all_times_det))
         return all_times_det
 
     return generate_photons_nn

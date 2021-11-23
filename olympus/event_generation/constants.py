@@ -18,4 +18,3 @@ class Constants(object):
     # 1 GeV EM cascade corresponds to 5.3 m Cherenkov track length
     # In the relevent wavelength interval, a single charged particle emmits 250 photons / cm
     photons_per_GeV = 5.3 * 250 * 1e2
-    photocathode_area = 500 * 1e-4  # m^2

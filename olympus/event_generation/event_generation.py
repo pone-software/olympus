@@ -17,6 +17,7 @@ from .detector import (
 
 from .mc_record import MCRecord
 from .photon_propagation import PhotonSource, dejit_sources, generate_photons
+from .lightyield import make_realistic_cascade_source
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,7 @@ def generate_cascade(
     seed=31337,
     pprop_func=generate_photons,
     pprop_extras=None,
+    converter_func=make_realistic_cascade_source,
 ):
     """
     Generate a single cascade with given amplitude and position and return time of detected photons.
@@ -60,13 +62,20 @@ def generate_cascade(
             Position (x, y, z) of the cascade
         t0: float
             Time of the cascade
+        dir: float
+            Direction of the cascade
         energy: float
             Energy of the cascade
         n_photons: float
-            If specified, directly use this instead of converting the energy into n_photons
+            If specified, directly use this instead of converting the energy into n_photons.
         seed: int
         pprop_func: function
+            Function to calculate the photon signal
         pprop_extras: dict
+        converter_func: function
+            Function to calculate number of photons as function of energy
+        converter_extras: dict
+
 
     """
     if energy is None and n_photons is None:
@@ -77,25 +86,27 @@ def generate_cascade(
     if pprop_extras is None:
         pprop_extras = {}
 
-    source = PhotonSource(pos, n_photons, t0, dir)
-    source_list = [source]
+    if converter_extras is None:
+        converter_extras = {}
+
+    source_list = make_realistic_cascade_source(
+        pos, t0, dir, energy, particle_id, **converter_extras
+    )
     record = MCRecord(
         "cascade",
         dejit_sources(source_list),
-        {"energy": energy, "position": pos, "direction": dir},
+        {"energy": energy, "position": pos, "direction": dir, "time": t0},
     )
-    hit_times = ak.sort(
-        ak.Array(
-            pprop_func(
-                det.module_coords,
-                det.module_efficiencies,
-                List(source_list),
-                seed=seed,
-                **pprop_extras
-            )
-        )
+
+    propagation_result = pprop_func(
+        det.module_coords,
+        det.module_efficiencies,
+        List(source_list),
+        seed=seed,
+        **pprop_extras
     )
-    return hit_times, record
+
+    return propagation_result, record
 
 
 def generate_cascades(
