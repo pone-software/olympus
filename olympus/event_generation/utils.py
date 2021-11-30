@@ -43,7 +43,7 @@ def proposal_setup():
 
     args = {
         "particle_def": pp.particle.MuMinusDef(),
-        "target": pp.medium.Ice(),
+        "target": pp.medium.Water(),
         "interpolate": True,
         "cuts": pp.EnergyCutSettings(500, 1, False),
     }

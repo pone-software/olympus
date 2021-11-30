@@ -2,22 +2,20 @@
 import logging
 
 import awkward as ak
-from numba.typed import List
 import numpy as np
+from numba.typed import List
 from tqdm.auto import trange
 
 from .constants import Constants
 from .detector import (
-    sample_cylinder_volume,
-    sample_cylinder_surface,
-    sample_direction,
     generate_noise,
-    trigger,
+    sample_cylinder_surface,
+    sample_cylinder_volume,
+    sample_direction,
 )
-
+from .lightyield import make_realistic_cascade_source
 from .mc_record import MCRecord
 from .photon_propagation import PhotonSource, dejit_sources, generate_photons
-from .lightyield import make_realistic_cascade_source
 
 logger = logging.getLogger(__name__)
 
@@ -45,12 +43,13 @@ def generate_cascade(
     pos,
     t0,
     dir,
-    energy=None,
-    n_photons=None,
+    energy,
+    particle_id,
     seed=31337,
     pprop_func=generate_photons,
     pprop_extras=None,
     converter_func=make_realistic_cascade_source,
+    converter_extras=None,
 ):
     """
     Generate a single cascade with given amplitude and position and return time of detected photons.
@@ -66,8 +65,7 @@ def generate_cascade(
             Direction of the cascade
         energy: float
             Energy of the cascade
-        n_photons: float
-            If specified, directly use this instead of converting the energy into n_photons.
+        particle_id: int
         seed: int
         pprop_func: function
             Function to calculate the photon signal
@@ -75,23 +73,14 @@ def generate_cascade(
         converter_func: function
             Function to calculate number of photons as function of energy
         converter_extras: dict
-
-
     """
-    if energy is None and n_photons is None:
-        raise RuntimeError("Set either energy or n_photons")
-    if energy is not None:
-        n_photons = energy * Constants.photons_per_GeV
-
     if pprop_extras is None:
         pprop_extras = {}
 
     if converter_extras is None:
         converter_extras = {}
 
-    source_list = make_realistic_cascade_source(
-        pos, t0, dir, energy, particle_id, **converter_extras
-    )
+    source_list = converter_func(pos, t0, dir, energy, particle_id, **converter_extras)
     record = MCRecord(
         "cascade",
         dejit_sources(source_list),

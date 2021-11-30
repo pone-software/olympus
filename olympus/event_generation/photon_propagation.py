@@ -1,4 +1,5 @@
 """Implements photon propagation."""
+import awkward as ak
 import numpy as np
 import torch
 from hyperion.models.photon_arrival_time.pdf import sample_exp_exp_exp
@@ -92,7 +93,7 @@ def generate_photons(
     pandel_lambda=Constants.pandel_lambda,
     theta_cherenkov=Constants.theta_cherenkov,
     pandel_rho=Constants.pandel_rho,
-    photocathode_area=Constants.photocathode_area,
+    photocathode_area=400e-4,
     lambda_abs=Constants.lambda_abs,
     lambda_sca=Constants.lambda_sca,
     seed=31337,
@@ -167,7 +168,7 @@ def generate_biolumi_photons(
     sources,
     c_vac=Constants.c_vac,
     n_gr=Constants.n_gr,
-    photocathode_area=Constants.photocathode_area,
+    photocathode_area=400e-4,
     lambda_abs=Constants.lambda_abs,
     lambda_sca=Constants.lambda_sca,
     seed=31337,
@@ -351,17 +352,24 @@ def make_generate_photons_nn(model_path):
     return generate_photons_nn
 
 
-def make_generate_bin_amplitudes_nn(model_path):
+def make_generate_bin_amplitudes_nn(model_path, prediction=False):
     """
     Build a binned arival time sampling function.
 
     This function uses a pytorch model to predict the bin contents of the arrival time distribution.
+
+    Parameters:
+        model_path: str
+            Path to pytorch model
+        prediction: bool
+            If True, return predicted amplitudes instead of poisson samples
     """
 
     model, binning = torch.load(model_path)
     nbins = len(binning) - 1
     model = model.to(device)
     binning = binning.to(device)
+    bin_width = binning[1] - binning[0]
     model.eval()
 
     def generate_bin_amp_nn(
@@ -383,15 +391,51 @@ def make_generate_bin_amplitudes_nn(model_path):
 
         inp_pars, time_geo = source_to_model_input(module_coords, sources, c_vac, n_gr)
 
-        pred_amplitudes = (
-            torch.exp(
-                model(inp_pars).reshape([len(sources), module_coords.shape[0], nbins])
-            )
-            * source_amps
+        time_geo = torch.tensor(time_geo, device=device)
+        pred_frac_log = model(inp_pars).reshape(
+            [len(sources), module_coords.shape[0], nbins]
         )
 
-        samples = torch.poisson(pred_amplitudes, rng)
+        # We have the predicted amplitudes relative to each source's time.
+        # Now construct a binning that covers the full range spanned by all light sources.
+
+        tmin = torch.min(time_geo, axis=0)[0] + binning[0]
+        tmax = torch.max(time_geo, axis=0)[0] + binning[-1]
+
+        samples = []
+
+        for imod in range(module_coords.shape[0]):
+            new_binning = torch.arange(tmin[imod], tmax[imod] + bin_width, bin_width)
+            new_binning_offsets_bws = (
+                time_geo[:, imod] + binning[0] - tmin[imod]
+            ) / bin_width
+
+            new_binning_offsets = torch.floor(new_binning_offsets_bws).int()
+            new_binning_offsets_frac = new_binning_offsets_bws - new_binning_offsets
+            # print(new_binning_offsets, new_binning_offsets_frac)
+            interpolated = (
+                pred_frac_log[:, imod, :-1]
+                + torch.diff(pred_frac_log[:, imod, :], axis=1)
+                / bin_width
+                * new_binning_offsets_frac[..., np.newaxis]
+            )
+
+            interpolated_amps = torch.exp(interpolated) * source_amps[:, np.newaxis]
+
+            this_pred_amplitudes = torch.zeros(new_binning.shape[0] - 1, device=device)
+
+            for isource in range(len(sources)):
+                this_pred_amplitudes[
+                    new_binning_offsets[isource] : new_binning_offsets[isource]
+                    + nbins
+                    - 1
+                ] += interpolated_amps[isource]
+
+            if prediction:
+                samples.append((this_pred_amplitudes, new_binning))
+            else:
+                samples.append((torch.poisson(this_pred_amplitudes, rng), new_binning))
 
         return (samples, torch.tensor(time_geo, device=device))
 
-    return generate_bin_amp_nn, binning
+    return generate_bin_amp_nn
