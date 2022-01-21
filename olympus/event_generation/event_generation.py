@@ -3,7 +3,7 @@ import logging
 
 import awkward as ak
 import numpy as np
-from numba.typed import List
+import jax.numpy as jnp
 from tqdm.auto import trange
 
 from .constants import Constants
@@ -13,9 +13,9 @@ from .detector import (
     sample_cylinder_volume,
     sample_direction,
 )
-from .lightyield import make_realistic_cascade_source
+from .lightyield import make_realistic_cascade_source, make_pointlike_cascade_source
 from .mc_record import MCRecord
-from .photon_propagation import PhotonSource, dejit_sources, generate_photons
+from .photon_source import PhotonSource
 
 logger = logging.getLogger(__name__)
 
@@ -45,10 +45,10 @@ def generate_cascade(
     dir,
     energy,
     particle_id,
-    seed=31337,
-    pprop_func=generate_photons,
+    seed,
+    pprop_func,
+    converter_func,
     pprop_extras=None,
-    converter_func=make_realistic_cascade_source,
     converter_extras=None,
 ):
     """
@@ -80,17 +80,22 @@ def generate_cascade(
     if converter_extras is None:
         converter_extras = {}
 
-    source_list = converter_func(pos, t0, dir, energy, particle_id, **converter_extras)
+    source_pos, source_dir, source_time, source_nphotons = converter_func(
+        pos, t0, dir, energy, particle_id, **converter_extras
+    )
     record = MCRecord(
         "cascade",
-        dejit_sources(source_list),
+        None,  # TODO
         {"energy": energy, "position": pos, "direction": dir, "time": t0},
     )
 
     propagation_result = pprop_func(
         det.module_coords,
         det.module_efficiencies,
-        List(source_list),
+        source_pos,
+        source_dir,
+        source_time,
+        source_nphotons,
         seed=seed,
         **pprop_extras
     )
@@ -103,10 +108,10 @@ def generate_cascades(
     height,
     radius,
     nsamples,
-    seed=31337,
-    log_emin=2,
-    log_emax=6,
-    pprop_func=generate_photons,
+    seed,
+    log_emin,
+    log_emax,
+    pprop_func,
     pprop_extras=None,
     noise_function=simulate_noise,
 ):
@@ -140,19 +145,79 @@ def generate_cascades(
     return events, records
 
 
+def generate_muon_energy_losses(
+    propagator, energy, track_len, position, direction, time
+):
+    try:
+        import proposal as pp
+    except ImportError as e:
+        logger.critical("Could not import proposal!")
+        raise e
+
+    init_state = pp.particle.ParticleState()
+    init_state.energy = energy * 1e3  # initial energy in MeV
+    init_state.position = pp.Cartesian3D(
+        position[0] * 100, position[1] * 100, position[2] * 100
+    )
+    init_state.direction = pp.Cartesian3D(direction[0], direction[1], direction[2])
+    track = propagator.propagate(init_state, track_len * 100)  # cm
+
+    aspos = []
+    asdir = []
+    astime = []
+    asph = []
+
+    # harvest losses
+    for loss in track.stochastic_losses():
+        # dist = loss.position.z / 100
+        e_loss = loss.energy / 1e3
+
+        """
+        dir = np.asarray([loss.direction.x, loss.direction.y, loss.direction.z])
+        
+        p = position + dist * direction
+        t = dist / Constants.c_vac + time
+        """
+
+        p = np.asarray([loss.position.x, loss.position.y, loss.position.z]) / 100
+        dir = np.asarray([loss.direction.x, loss.direction.y, loss.direction.z])
+        t = np.linalg.norm(p - position) / Constants.c_vac + time
+
+        # TODO: Switch on loss type
+        if e_loss < 1e3:
+            spos, sdir, stime, sph = make_pointlike_cascade_source(
+                p, t, dir, e_loss, 11
+            )
+        else:
+            spos, sdir, stime, sph = make_realistic_cascade_source(
+                p, t, dir, e_loss, 11
+            )
+
+        aspos.append(spos)
+        asdir.append(sdir)
+        astime.append(stime)
+        asph.append(sph)
+
+    return (
+        jnp.concatenate(aspos),
+        jnp.concatenate(asdir),
+        jnp.concatenate(astime),
+        jnp.concatenate(asph),
+        track.track_propagated_distances()[-1] / 100,
+    )
+
+
 def generate_realistic_track(
     det,
     pos,
     direc,
     track_len,
     energy,
-    t0=0,
-    res=10,
-    seed=31337,
-    rng=np.random.RandomState(31337),
-    propagator=None,
-    pprop_func=generate_photons,
+    t0,
+    seed,
+    pprop_func,
     pprop_extras=None,
+    propagator=None,
 ):
     """
     Generate a realistic track using energy losses from PROPOSAL.
@@ -176,13 +241,6 @@ def generate_realistic_track(
       kwargs: dict
          kwargs passed to `generate_photons`
     """
-    try:
-        import proposal as pp
-    except ImportError as e:
-        logger.critical("Could not import proposal!")
-        raise e
-
-    sources = []
 
     if propagator is None:
         raise RuntimeError()
@@ -190,44 +248,34 @@ def generate_realistic_track(
     if pprop_extras is None:
         pprop_extras = {}
 
-    init_state = pp.particle.ParticleState()
-    init_state.energy = energy * 1e3  # initial energy in MeV
-    init_state.position = pp.Cartesian3D(0, 0, 0)
-    init_state.direction = pp.Cartesian3D(0, 0, 1)
-    track = propagator.propagate(init_state, track_len * 100)  # cm
-
-    # harvest losses
-    for loss in track.stochastic_losses():
-        dist = loss.position.z / 100
-        e_loss = loss.energy / 1e3
-        dir = np.asarray([loss.direction.x, loss.direction.y, loss.direction.z])
-        p = pos + dist * direc
-        t = dist / Constants.c_vac + t0
-
-        if np.linalg.norm(p) > det.outer_radius + 3 * Constants.lambda_abs:
-            continue
-        sources.append(PhotonSource(p, e_loss * Constants.photons_per_GeV, t, dir))
+    (
+        source_pos,
+        source_dir,
+        source_time,
+        source_photons,
+        prop_dist,
+    ) = generate_muon_energy_losses(propagator, energy, track_len, pos, direc, t0)
 
     record = MCRecord(
         "realistic_track",
-        dejit_sources(sources),
+        None,
         {
             "position": pos,
             "energy": energy,
-            "track_len": track.track_propagated_distances()[-1] / 100,
+            "track_len": prop_dist,
             "direction": direc,
         },
     )
-
-    if not sources:
-        return ak.Array([[]]), record
 
     hit_times = ak.sort(
         ak.Array(
             pprop_func(
                 det.module_coords,
                 det.module_efficiencies,
-                List(sources),
+                source_pos,
+                source_dir,
+                source_time,
+                source_photons,
                 seed=seed,
                 **pprop_extras
             )
@@ -241,11 +289,11 @@ def generate_realistic_tracks(
     height,
     radius,
     nsamples,
-    seed=31337,
+    seed,
+    log_emin,
+    log_emax,
+    pprop_func,
     propagator=None,
-    log_emin=2,
-    log_emax=6,
-    pprop_func=generate_photons,
     pprop_extras=None,
 ):
     """Generate realistic muon tracks."""
@@ -314,11 +362,11 @@ def generate_realistic_starting_tracks(
     height,
     radius,
     nsamples,
-    seed=31337,
+    seed,
+    log_emin,
+    log_emax,
     propagator=None,
-    log_emin=2,
-    log_emax=6,
-    pprop_func=generate_photons,
+    pprop_func=None,
     pprop_extras=None,
 ):
     """Generate realistic starting tracks (cascade + track)."""

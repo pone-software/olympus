@@ -3,11 +3,15 @@ import os
 
 import numpy as np
 import scipy.integrate
-from fennel import Fennel
+from fennel import Fennel, config
 
 from .constants import Constants
-from .photon_propagation import PhotonSource
+from .photon_source import PhotonSource
 
+import jax.numpy as jnp
+import jax
+
+config["general"]["jax"] = True
 fennel_instance = Fennel()
 
 
@@ -37,13 +41,13 @@ def fennel_total_light_yield(energy, particle_id):
     funcs = fennel_instance.auto_yields(energy, particle_id, function=True)
     counts_func = funcs[0]
 
-    wavelengths = np.linspace(350, 500, 50)
-    light_yield = np.trapz(counts_func(energy, wavelengths).ravel(), wavelengths)
+    wavelengths = jnp.linspace(350, 500, 50)
+    light_yield = jnp.trapz(counts_func(energy, wavelengths).ravel(), wavelengths)
 
     return light_yield
 
 
-def fennel_frac_long_light_yield(energy, particle_id, resolution):
+def fennel_frac_long_light_yield(energy, particle_id, resolution=0.2):
     """
     Calculate the longitudinal light yield contribution.
 
@@ -59,18 +63,17 @@ def fennel_frac_long_light_yield(energy, particle_id, resolution):
     """
     funcs = fennel_instance.auto_yields(energy, particle_id, function=True)
     long_func = funcs[4]
-    int_grid = np.arange(0, 30, resolution)
+    int_grid = jnp.arange(1e-3, 30, resolution)
 
-    def integrand(z):
-        return long_func(energy, z)
+    def integrate(low, high, resolution=1000):
+        trapz_x_eval = jnp.linspace(low, high, resolution) * 100  # to cm
+        trapz_y_eval = long_func(energy, trapz_x_eval)
+        return jnp.trapz(trapz_y_eval, trapz_x_eval)
 
-    norm = scipy.integrate.quad(integrand, 0, np.infty)[0]
+    integrate_v = jax.vmap(integrate, in_axes=[0, 0])
 
-    frac_yields = np.empty(len(int_grid) - 1)
-
-    for i in range(len(int_grid) - 1):
-        inte = scipy.integrate.quad(integrand, int_grid[i] * 100, int_grid[i + 1] * 100)
-        frac_yields[i] = inte[0] / norm
+    norm = integrate(1e-3, 100)
+    frac_yields = integrate_v(int_grid[:-1], int_grid[1:]) / norm
 
     return frac_yields, int_grid
 
@@ -95,9 +98,15 @@ def make_pointlike_cascade_source(pos, t0, dir, energy, particle_id):
         List[PhotonSource]
 
     """
-    n_photons = fennel_total_light_yield(energy, particle_id)
-    source = PhotonSource(pos, n_photons, t0, dir)
-    return [source]
+    source_nphotons = jnp.asarray([fennel_total_light_yield(energy, particle_id)])[
+        np.newaxis, :
+    ]
+
+    source_pos = pos[np.newaxis, :]
+    source_dir = dir[np.newaxis, :]
+    source_time = jnp.asarray([t0])[np.newaxis, :]
+    # source = PhotonSource(pos, n_photons, t0, dir)
+    return source_pos, source_dir, source_time, source_nphotons
 
 
 def make_realistic_cascade_source(pos, t0, dir, energy, particle_id, resolution=0.2):
@@ -124,6 +133,20 @@ def make_realistic_cascade_source(pos, t0, dir, energy, particle_id, resolution=
     n_photons_total = fennel_total_light_yield(energy, particle_id)
     frac_yields, grid = fennel_frac_long_light_yield(energy, particle_id, resolution)
 
+    dist_along = 0.5 * (grid[:-1] + grid[1:])
+    source_pos = dist_along[:, np.newaxis] * dir[np.newaxis, :] + pos[np.newaxis, :]
+    source_dir = jnp.tile(dir, (dist_along.shape[0], 1))
+    source_nphotons = frac_yields * n_photons_total
+    source_time = t0 + dist_along / (Constants.c_vac)
+
+    return (
+        source_pos,
+        source_dir,
+        source_time[:, np.newaxis],
+        source_nphotons[:, np.newaxis],
+    )
+
+    """
     sources = []
     for i, frac_yield in enumerate(frac_yields):
 
@@ -138,3 +161,4 @@ def make_realistic_cascade_source(pos, t0, dir, energy, particle_id, resolution=
             )
         )
     return sources
+    """

@@ -191,6 +191,74 @@ def make_hex_grid(
     return modules
 
 
+def make_triang(
+    side_len,
+    oms_per_line=20,
+    dist_z=50,
+    dark_noise_rate=16 * 1e-5,
+    rng=np.random.RandomState(0),
+):
+
+    modules = make_line(
+        -side_len / 2, 0, oms_per_line, dist_z, rng, dark_noise_rate, 0, efficiency=0.3
+    )
+    modules += make_line(
+        side_len / 2, 0, oms_per_line, dist_z, rng, dark_noise_rate, 1, efficiency=0.3
+    )
+    modules += make_line(
+        0,
+        np.sqrt(3) / 2 * side_len,
+        oms_per_line,
+        dist_z,
+        rng,
+        dark_noise_rate,
+        2,
+        efficiency=0.3,
+    )
+    det = Detector(modules)
+
+    return det
+
+
+def make_rhombus(
+    side_len,
+    oms_per_line=20,
+    dist_z=50,
+    dark_noise_rate=16 * 1e-5,
+    rng=np.random.RandomState(0),
+):
+
+    modules = make_line(
+        -side_len / 2, 0, oms_per_line, dist_z, rng, dark_noise_rate, 0, efficiency=0.3
+    )
+    modules += make_line(
+        side_len / 2, 0, oms_per_line, dist_z, rng, dark_noise_rate, 1, efficiency=0.3
+    )
+    modules += make_line(
+        0,
+        np.sqrt(3) / 2 * side_len,
+        oms_per_line,
+        dist_z,
+        rng,
+        dark_noise_rate,
+        2,
+        efficiency=0.3,
+    )
+    modules += make_line(
+        0,
+        -np.sqrt(3) / 2 * side_len,
+        oms_per_line,
+        dist_z,
+        rng,
+        dark_noise_rate,
+        3,
+        efficiency=0.3,
+    )
+    det = Detector(modules)
+
+    return det
+
+
 def sample_cylinder_surface(height, radius, n, rng=np.random.RandomState(1337)):
     """Sample points on a cylinder surface."""
     side_area = 2 * np.pi * radius * height
