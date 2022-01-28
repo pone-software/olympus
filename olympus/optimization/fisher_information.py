@@ -1,22 +1,22 @@
 import awkward as ak
-import numpy as np
 import jax
+import numpy as np
 from jax import numpy as jnp
 from jax import random
-from jax.lax import Precision
+
 from ..event_generation.event_generation import (
     generate_cascade,
-    generate_realistic_track,
     generate_muon_energy_losses,
+    generate_realistic_track,
+    simulate_noise,
 )
-from olympus.event_generation.utils import proposal_setup
-from olympus.event_generation.photon_propagation.utils import sources_to_array
+from ..event_generation.utils import proposal_setup
+from ..utils import rotate_to_new_direc_v
 
 
 def pad_event(event):
 
     pad_len = np.int32(np.ceil(ak.max(ak.count(event, axis=1)) / 256) * 256)
-    print(f"Pad len: {pad_len}")
 
     if ak.max(ak.count(event, axis=1)) > pad_len:
         raise RuntimeError()
@@ -38,33 +38,36 @@ def sph_to_cart_jnp(theta, phi=0):
 def calc_fisher_info_cascades(
     det, event_data, key, converter, ph_prop, lh_func, c_medium, n_ev=20
 ):
-    def make_wrap_lh_call(event):
-        def wrap_lh_call(x, y, z, theta, phi, time, log10_energy):
-            event_dir = sph_to_cart_jnp(theta, phi)
-            pos = jnp.asarray([x, y, z])
+    def eval_for_mod(
+        x, y, z, theta, phi, t, log10e, times, mod_coords, noise_rate, key
+    ):
 
-            source_pos, source_dir, source_time, source_nphotons = converter(
-                pos, time, event_dir, 10 ** log10_energy, 11
-            )
+        pos = jnp.asarray([x, y, z])
+        dir = sph_to_cart_jnp(theta, phi)
 
-            return lh_func(
-                event,
-                det.module_coords,
-                source_pos,
-                source_dir,
-                source_time,
-                source_nphotons,
-                c_medium,
-            )
+        sources = converter(
+            pos, t, dir, 10 ** log10e, particle_id=event_data["pid"], key=key
+        )
 
-        return wrap_lh_call
+        return lh_func(
+            times,
+            mod_coords,
+            sources[0],
+            sources[1],
+            sources[2],
+            sources[3],
+            c_medium,
+            noise_rate,
+        )
+
+    eval_jacobian = jax.jit(jax.jacobian(eval_for_mod, [0, 1, 2, 3, 4, 5, 6]))
 
     event_dir = sph_to_cart_jnp(event_data["theta"], event_data["phi"])
 
     matrices = []
     for _ in range(n_ev):
-        key, subkey = random.split(key)
-        event, record = generate_cascade(
+        key, k1, k2 = random.split(key, 3)
+        event, _ = generate_cascade(
             det,
             event_data["pos"],
             event_data["t0"],
@@ -72,53 +75,37 @@ def calc_fisher_info_cascades(
             energy=event_data["energy"],
             particle_id=event_data["pid"],
             pprop_func=ph_prop,
-            seed=subkey,
+            seed=k1,
             converter_func=converter,
-            pprop_extras={"c_medium": c_medium},
         )
+
+        event, _ = simulate_noise(det, event)
 
         padded = pad_event(event)
 
-        wrap_lh_call = make_wrap_lh_call(padded)
+        jacsum = 0
+        for j in range(padded.shape[0]):
 
-        jac = jax.jit(
-            jax.jacobian(wrap_lh_call, argnums=list(range(7)))(
-                event_data["pos"][0],
-                event_data["pos"][1],
-                event_data["pos"][2],
-                event_data["theta"],
-                event_data["phi"],
-                event_data["t0"],
-                np.log10(event_data["energy"]),
+            res = jnp.stack(
+                eval_jacobian(
+                    event_data["pos"][0],
+                    event_data["pos"][1],
+                    event_data["pos"][2],
+                    event_data["theta"],
+                    event_data["phi"],
+                    event_data["t0"],
+                    np.log10(event_data["energy"]),
+                    padded[j],
+                    det.module_coords[j],
+                    det.module_noise_rates[j],
+                    k2,
+                )
             )
-        )
+            jacsum += res
+        matrices.append(np.asarray(jacsum[:, np.newaxis] * jacsum[np.newaxis, :]))
 
-        jac = np.stack(jac)[:, np.newaxis]
-        matrices.append(jac * jac.T)
-    matrix = np.average(np.stack(matrices), axis=0)
-    return matrix
-
-
-def rotate_to_new_direc(old_dir, new_dir, operand):
-
-    axis = jnp.cross(old_dir, new_dir)
-    axis /= jnp.linalg.norm(axis)
-
-    theta = jnp.arccos(jnp.dot(old_dir, new_dir, precision=Precision.HIGHEST))
-
-    # Rodrigues' rotation formula
-
-    v_rot = (
-        operand * jnp.cos(theta)
-        + jnp.cross(axis, operand) * jnp.sin(theta)
-        + axis
-        * jnp.dot(axis, operand, precision=Precision.HIGHEST)
-        * (1 - jnp.cos(theta))
-    )
-    return v_rot
-
-
-rotate_to_new_direc_v = jax.jit(jax.vmap(rotate_to_new_direc, in_axes=[None, None, 0]))
+    fisher = np.average(np.stack(matrices), axis=0)
+    return fisher
 
 
 def calc_fisher_info_tracks(det, event_data, key, ph_prop, lh_func, c_medium):

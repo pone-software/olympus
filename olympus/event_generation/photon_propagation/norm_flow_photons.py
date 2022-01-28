@@ -3,6 +3,7 @@ import pickle
 import awkward as ak
 import jax
 import jax.numpy as jnp
+from jax.lax import cond
 import numpy as np
 from hyperion.models.photon_arrival_time_nflow.net import (
     make_counts_net_fn,
@@ -138,7 +139,9 @@ def make_generate_norm_flow_photons(shape_model_path, counts_model_path):
     return generate_norm_flow_photons
 
 
-def make_nflow_photon_likelihood_per_module(shape_model_path, counts_model_path):
+def make_nflow_photon_likelihood_per_module(
+    shape_model_path, counts_model_path, split_shape_counts=False
+):
     shape_config, shape_params = pickle.load(open(shape_model_path, "rb"))
     counts_config, counts_params = pickle.load(open(counts_model_path, "rb"))
 
@@ -176,7 +179,9 @@ def make_nflow_photon_likelihood_per_module(shape_model_path, counts_model_path)
         source_time,
         source_photons,
         c_medium,
+        noise_rate,
     ):
+
         inp_pars, time_geo = sources_to_model_input_per_module(
             module_coords,
             source_pos,
@@ -187,6 +192,25 @@ def make_nflow_photon_likelihood_per_module(shape_model_path, counts_model_path)
 
         inp_pars = inp_pars.reshape((source_pos.shape[0], inp_pars.shape[-1]))
         time_geo = time_geo.reshape((source_pos.shape[0], time_geo.shape[-1]))
+
+        ph_frac = jnp.power(10, counts_net_apply_fn(counts_params, inp_pars)).reshape(
+            source_pos.shape[0]
+        )
+
+        noise_window_len = 6000
+        noise_photons = noise_rate * noise_window_len
+
+        n_photons = jnp.reshape(
+            ph_frac * source_photons.squeeze(), (source_pos.shape[0],)
+        )
+        n_ph_pred_per_mod = jnp.sum(n_photons)
+        n_ph_pred_per_mod_total = n_ph_pred_per_mod + noise_photons
+
+        n_ph_meas = jnp.isfinite(times).sum()
+
+        counts_lh = jnp.sum(
+            -n_ph_pred_per_mod_total + n_ph_meas * jnp.log(n_ph_pred_per_mod_total)
+        )
 
         traf_params = apply_fn(shape_params, inp_pars)
         traf_params = traf_params.reshape((source_pos.shape[0], traf_params.shape[-1]))
@@ -207,10 +231,6 @@ def make_nflow_photon_likelihood_per_module(shape_model_path, counts_model_path)
             (traf_params.shape[0], 1, traf_params.shape[1])
         )
 
-        ph_frac = jnp.power(10, counts_net_apply_fn(counts_params, inp_pars)).reshape(
-            source_pos.shape[0]
-        )
-
         # Sanitize likelihood evaluation to avoid nans.
         sanitized_times = jnp.where(mask, t_res, jnp.zeros_like(t_res))
         shape_lh = eval_l_p(traf_params, sanitized_times)
@@ -223,12 +243,7 @@ def make_nflow_photon_likelihood_per_module(shape_model_path, counts_model_path)
         )
         """
 
-        # If only one (or a couple of) time - source pair is unphysical, we have to mask them later
-
-        n_photons = ph_frac * source_photons.squeeze()
-        n_ph_pred_per_mod = jnp.sum(n_photons)
-
-        source_weight = n_photons.squeeze() / jnp.sum(n_photons)
+        source_weight = n_photons / jnp.sum(n_photons)
         # Mask the scale factor. This will remove unwanted source-time pairs from the logsumexp
         scale_factor = source_weight[:, np.newaxis] * mask + 1e-10
 
@@ -236,21 +251,29 @@ def make_nflow_photon_likelihood_per_module(shape_model_path, counts_model_path)
 
         shape_lh = jax.scipy.special.logsumexp(shape_lh, b=scale_factor, axis=0)
 
-        print(shape_lh.shape)
+        noise_lh = -jnp.log(noise_window_len) * n_ph_meas
 
-        # shape_lh = jax.scipy.special.logsumexp(shape_lh + jnp.log(source_weight)[:, np.newaxis], axis=0)
-        # print(shape_lh.shape)
+        total_shape_lh = jnp.logaddexp(
+            noise_lh + jnp.log(noise_photons / n_ph_pred_per_mod_total),
+            shape_lh + jnp.log(n_ph_pred_per_mod / n_ph_pred_per_mod_total),
+        )
 
-        n_ph_meas = jnp.isfinite(times).sum()
+        # total_lh = shape_lh
 
-        counts_lh = -n_ph_pred_per_mod + n_ph_meas * jnp.log(n_ph_pred_per_mod)
+        if split_shape_counts:
+            return total_shape_lh, counts_lh, n_ph_pred_per_mod_total
 
-        return shape_lh.sum() + counts_lh.sum()
+        shape_lh_sum = cond(
+            jnp.any(finite_times), lambda tlh: tlh.sum(), lambda _: 0.0, total_shape_lh
+        )
+
+        return shape_lh_sum + counts_lh
 
     return eval_per_module_likelihood
 
 
 def make_nflow_photon_likelihood(shape_model_path, counts_model_path):
+    raise RuntimeError("Add noise")
 
     shape_config, shape_params = pickle.load(open(shape_model_path, "rb"))
     counts_config, counts_params = pickle.load(open(counts_model_path, "rb"))

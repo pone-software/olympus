@@ -2,8 +2,9 @@
 import logging
 
 import awkward as ak
-import numpy as np
 import jax.numpy as jnp
+import numpy as np
+from jax import random
 from tqdm.auto import trange
 
 from .constants import Constants
@@ -13,7 +14,7 @@ from .detector import (
     sample_cylinder_volume,
     sample_direction,
 )
-from .lightyield import make_realistic_cascade_source, make_pointlike_cascade_source
+from .lightyield import make_pointlike_cascade_source, make_realistic_cascade_source
 from .mc_record import MCRecord
 from .photon_source import PhotonSource
 
@@ -48,8 +49,6 @@ def generate_cascade(
     seed,
     pprop_func,
     converter_func,
-    pprop_extras=None,
-    converter_extras=None,
 ):
     """
     Generate a single cascade with given amplitude and position and return time of detected photons.
@@ -69,19 +68,15 @@ def generate_cascade(
         seed: int
         pprop_func: function
             Function to calculate the photon signal
-        pprop_extras: dict
         converter_func: function
             Function to calculate number of photons as function of energy
-        converter_extras: dict
-    """
-    if pprop_extras is None:
-        pprop_extras = {}
 
-    if converter_extras is None:
-        converter_extras = {}
+    """
+
+    k1, k2 = random.split(seed)
 
     source_pos, source_dir, source_time, source_nphotons = converter_func(
-        pos, t0, dir, energy, particle_id, **converter_extras
+        pos, t0, dir, energy, particle_id, key=k1
     )
     record = MCRecord(
         "cascade",
@@ -96,8 +91,7 @@ def generate_cascade(
         source_dir,
         source_time,
         source_nphotons,
-        seed=seed,
-        **pprop_extras
+        seed=k2,
     )
 
     return propagation_result, record

@@ -1,15 +1,16 @@
 """Light yield calculation."""
 import os
 
+import jax
+import jax.numpy as jnp
 import numpy as np
 import scipy.integrate
 from fennel import Fennel, config
+from jax import random
 
 from .constants import Constants
 from .photon_source import PhotonSource
-
-import jax.numpy as jnp
-import jax
+from ..utils import rotate_to_new_direc_v
 
 config["general"]["jax"] = True
 fennel_instance = Fennel()
@@ -109,7 +110,12 @@ def make_pointlike_cascade_source(pos, t0, dir, energy, particle_id):
     return source_pos, source_dir, source_time, source_nphotons
 
 
-def make_realistic_cascade_source(pos, t0, dir, energy, particle_id, resolution=0.2):
+rotate_to_new_direc_v
+
+
+def make_realistic_cascade_source(
+    pos, t0, dir, energy, particle_id, key, resolution=0.2, moliere_rand=False
+):
     """
     Create a realistic (elongated) particle cascade.
 
@@ -127,14 +133,36 @@ def make_realistic_cascade_source(pos, t0, dir, energy, particle_id, resolution=
             Cascade energy
         particle_id: int
             Particle type (PDG ID)
+        key: PRNGKey
+            Random key
         resolution: float
             Step size for point-like light sources
+        moliere_rand: bool
+            Switch moliere randomization
     """
     n_photons_total = fennel_total_light_yield(energy, particle_id)
     frac_yields, grid = fennel_frac_long_light_yield(energy, particle_id, resolution)
 
     dist_along = 0.5 * (grid[:-1] + grid[1:])
-    source_pos = dist_along[:, np.newaxis] * dir[np.newaxis, :] + pos[np.newaxis, :]
+
+    if moliere_rand:
+        moliere_radius = 0.21
+        key, k1, k2 = random.split(key, 3)
+        r = moliere_radius * jnp.sqrt(random.uniform(k1, shape=dist_along.shape))
+        phi = random.uniform(k2, shape=dist_along.shape, maxval=2 * np.pi)
+        x = r * jnp.cos(phi)
+        y = r * jnp.sin(phi)
+
+        dpos_vec = jnp.stack([x, y, jnp.zeros_like(x)], axis=1)
+        dpos_vec = rotate_to_new_direc_v(jnp.asarray([0, 0, 1]), dir, dpos_vec)
+        source_pos = (
+            dist_along[:, np.newaxis] * dir[np.newaxis, :]
+            + pos[np.newaxis, :]
+            + dpos_vec
+        )
+    else:
+        source_pos = dist_along[:, np.newaxis] * dir[np.newaxis, :] + pos[np.newaxis, :]
+
     source_dir = jnp.tile(dir, (dist_along.shape[0], 1))
     source_nphotons = frac_yields * n_photons_total
     source_time = t0 + dist_along / (Constants.c_vac)
@@ -145,20 +173,3 @@ def make_realistic_cascade_source(pos, t0, dir, energy, particle_id, resolution=
         source_time[:, np.newaxis],
         source_nphotons[:, np.newaxis],
     )
-
-    """
-    sources = []
-    for i, frac_yield in enumerate(frac_yields):
-
-        dist_along = 0.5 * (grid[i] + grid[i + 1])
-        src_pos = dist_along * dir + pos
-        sources.append(
-            PhotonSource(
-                src_pos,
-                frac_yield * n_photons_total,
-                t0 + dist_along / (Constants.c_vac),
-                dir,
-            )
-        )
-    return sources
-    """

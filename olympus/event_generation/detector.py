@@ -55,6 +55,7 @@ class Detector(object):
         self.module_coords = np.vstack([m.pos for m in self.modules])
         self.module_coords_ak = ak.Array(self.module_coords)
         self.module_efficiencies = np.asarray([m.efficiency for m in self.modules])
+        self.module_noise_rates = np.asarray([m.noise_rate for m in self.modules])
 
         self._outer_radius = np.linalg.norm(self.module_coords, axis=1).max()
         self._outer_cylinder = (
@@ -199,15 +200,31 @@ def make_triang(
     rng=np.random.RandomState(0),
 ):
 
+    height = np.sqrt(side_len ** 2 - (side_len / 2) ** 2)
+
     modules = make_line(
-        -side_len / 2, 0, oms_per_line, dist_z, rng, dark_noise_rate, 0, efficiency=0.3
+        -side_len / 2,
+        -height / 3,
+        oms_per_line,
+        dist_z,
+        rng,
+        dark_noise_rate,
+        0,
+        efficiency=0.3,
     )
     modules += make_line(
-        side_len / 2, 0, oms_per_line, dist_z, rng, dark_noise_rate, 1, efficiency=0.3
+        side_len / 2,
+        -height / 3,
+        oms_per_line,
+        dist_z,
+        rng,
+        dark_noise_rate,
+        1,
+        efficiency=0.3,
     )
     modules += make_line(
         0,
-        np.sqrt(3) / 2 * side_len,
+        2 / 3 * height,
         oms_per_line,
         dist_z,
         rng,
@@ -215,6 +232,7 @@ def make_triang(
         2,
         efficiency=0.3,
     )
+
     det = Detector(modules)
 
     return det
