@@ -1,4 +1,6 @@
 import htcondor
+import htcondor.dags
+import classad
 import numpy as np
 from itertools import product
 
@@ -21,7 +23,7 @@ description = htcondor.Submit(
     error="ogs/fisher.err.$(spacing)_$(energy)",  # stderr from the job goes here
     request_gpus="1",  # resource requests; we don't need much per job for this problem
     **{
-        "+SingularityImage": htcondor.classad.quote(
+        "+SingularityImage": classad.quote(
             "/data/p-one/chaack/container/pytorch-geo.sif"
         ),
     }
@@ -44,4 +46,4 @@ layer = dag.layer(
 )
 
 dag_dir = "/scratch/chaack/condor"
-dag_file = htcondor.dags.write_dag(dag, dag_dir)
+dag_file = htcondor.dags.write_dag(dag, dag_dir, dag_file_name="fisher.dag")
