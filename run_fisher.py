@@ -1,5 +1,6 @@
 import os
 import argparse
+import pickle
 
 os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.8"
 import functools
@@ -91,4 +92,13 @@ fisher = calc_fisher_info_cascades(
     n_ev=50,
 )
 
-np.savez(args.outfile, spacing=args.spacing, energy=args.energy, fisher=fisher)
+pickle.dump({
+    "spacing": args.spacing,
+    "energy": args.energy,
+    "position": event_pos,
+    "theta": theta,
+    "phi": phi,
+    "fisher": fisher
+    }
+    args.outfile,
+)

@@ -10,6 +10,15 @@ from .constants import Constants
 logger = logging.getLogger(__name__)
 
 
+def sph_to_cart_jnp(theta, phi=0):
+    """Transform spherical to cartesian coordinates."""
+    x = jnp.sin(theta) * jnp.cos(phi)
+    y = jnp.sin(theta) * jnp.sin(phi)
+    z = jnp.cos(theta)
+
+    return jnp.asarray([x, y, z], dtype=jnp.float64)
+
+
 def t_geo(x, t_0, direc, x_0):
     """
     Calculate the expected arrival time of unscattered photons.

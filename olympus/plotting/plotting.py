@@ -47,7 +47,7 @@ def plot_event(det, hit_times, record=None, plot_tfirst=False, plot_hull=False):
         positions = []
         sizes = []
         for source in record.sources:
-            sizes.append((np.log10(source.n_photons) / 2) ** 2)
+            sizes.append(np.asscalar((np.log10(source.n_photons) / 2) ** 2))
             positions.append(
                 [source.position[0], source.position[1], source.position[2]]
             )

@@ -1,16 +1,12 @@
 """Light yield calculation."""
-import os
-
 import jax
 import jax.numpy as jnp
 import numpy as np
-import scipy.integrate
 from fennel import Fennel, config
 from jax import random
 
-from .constants import Constants
-from .photon_source import PhotonSource
 from ..utils import rotate_to_new_direc_v
+from .constants import Constants
 
 config["general"]["jax"] = True
 fennel_instance = Fennel()
@@ -29,7 +25,7 @@ def simple_cascade_light_yield(energy, *args):
     return energy * photons_per_GeV
 
 
-def fennel_total_light_yield(energy, particle_id):
+def fennel_total_light_yield(energy, particle_id, wavelength_range):
     """
     Calculate total light yield using fennel.
 
@@ -37,12 +33,13 @@ def fennel_total_light_yield(energy, particle_id):
         energy: float
             Particle energy in GeV
         particle_id: int
+        wavelength_range: tuple
     """
 
     funcs = fennel_instance.auto_yields(energy, particle_id, function=True)
     counts_func = funcs[0]
 
-    wavelengths = jnp.linspace(350, 500, 50)
+    wavelengths = jnp.linspace(wavelength_range[0], wavelength_range[1], 100)
     light_yield = jnp.trapz(counts_func(energy, wavelengths).ravel(), wavelengths)
 
     return light_yield
@@ -64,7 +61,7 @@ def fennel_frac_long_light_yield(energy, particle_id, resolution=0.2):
     """
     funcs = fennel_instance.auto_yields(energy, particle_id, function=True)
     long_func = funcs[4]
-    int_grid = jnp.arange(1e-3, 30, resolution)
+    int_grid = jnp.arange(1e-3, 25, resolution)
 
     def integrate(low, high, resolution=1000):
         trapz_x_eval = jnp.linspace(low, high, resolution) * 100  # to cm
@@ -79,7 +76,14 @@ def fennel_frac_long_light_yield(energy, particle_id, resolution=0.2):
     return frac_yields, int_grid
 
 
-def make_pointlike_cascade_source(pos, t0, dir, energy, particle_id):
+def make_pointlike_cascade_source(
+    pos,
+    t0,
+    dir,
+    energy,
+    particle_id,
+    wavelength_range=[290, 700],
+):
     """
     Create a pointlike lightsource.
 
@@ -94,14 +98,17 @@ def make_pointlike_cascade_source(pos, t0, dir, energy, particle_id):
             Cascade energy
         particle_id: int
             Particle type (PDG ID)
+        wavelength_range: tuple
+            Wavelength interval (nm)
+
 
     Returns:
         List[PhotonSource]
 
     """
-    source_nphotons = jnp.asarray([fennel_total_light_yield(energy, particle_id)])[
-        np.newaxis, :
-    ]
+    source_nphotons = jnp.asarray(
+        [fennel_total_light_yield(energy, particle_id, wavelength_range)]
+    )[np.newaxis, :]
 
     source_pos = pos[np.newaxis, :]
     source_dir = dir[np.newaxis, :]
@@ -114,7 +121,15 @@ rotate_to_new_direc_v
 
 
 def make_realistic_cascade_source(
-    pos, t0, dir, energy, particle_id, key, resolution=0.2, moliere_rand=False
+    pos,
+    t0,
+    dir,
+    energy,
+    particle_id,
+    key,
+    resolution=0.2,
+    moliere_rand=False,
+    wavelength_range=[290, 700],
 ):
     """
     Create a realistic (elongated) particle cascade.
@@ -139,8 +154,10 @@ def make_realistic_cascade_source(
             Step size for point-like light sources
         moliere_rand: bool
             Switch moliere randomization
+        wavelength_range: tuple
+            Wavelength interval (nm)
     """
-    n_photons_total = fennel_total_light_yield(energy, particle_id)
+    n_photons_total = fennel_total_light_yield(energy, particle_id, wavelength_range)
     frac_yields, grid = fennel_frac_long_light_yield(energy, particle_id, resolution)
 
     dist_along = 0.5 * (grid[:-1] + grid[1:])

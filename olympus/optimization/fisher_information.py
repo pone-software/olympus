@@ -11,7 +11,7 @@ from ..event_generation.event_generation import (
     simulate_noise,
 )
 from ..event_generation.utils import proposal_setup
-from ..utils import rotate_to_new_direc_v
+from ..utils import rotate_to_new_direc_v, sph_to_cart_jnp
 
 
 def pad_event(event):
@@ -24,15 +24,6 @@ def pad_event(event):
     # mask = ak.is_none(padded, axis=1)
     ev_np = np.asarray((ak.fill_none(padded, -np.inf)))
     return ev_np
-
-
-def sph_to_cart_jnp(theta, phi=0):
-    """Transform spherical to cartesian coordinates."""
-    x = jnp.sin(theta) * jnp.cos(phi)
-    y = jnp.sin(theta) * jnp.sin(phi)
-    z = jnp.cos(theta)
-
-    return jnp.asarray([x, y, z])
 
 
 def calc_fisher_info_cascades(

@@ -2,7 +2,7 @@ import jax.numpy as jnp
 from jax import jit, vmap
 import numpy as np
 
-from ..photon_source import PhotonSourceType
+from ..photon_source import PhotonSource, PhotonSourceType
 
 
 def source_to_model_input_per_module(
@@ -64,3 +64,16 @@ def sources_to_array(sources):
         source_time[i] = source.time
         source_photons[i] = source.n_photons
     return source_pos, source_dir, source_time, source_photons
+
+
+def source_array_to_sources(source_pos, source_dir, source_time, source_nphotons):
+    sources = []
+    for i in range(source_pos.shape[0]):
+        source = PhotonSource(
+            np.asarray(source_pos[i]),
+            np.asarray(source_nphotons[i]),
+            np.asarray(source_time[i]),
+            np.asarray(source_dir[i]),
+        )
+        sources.append(source)
+    return sources

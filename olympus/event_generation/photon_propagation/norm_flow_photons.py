@@ -14,12 +14,10 @@ from hyperion.models.photon_arrival_time_nflow.net import (
 )
 from jax import random
 
-from ..constants import Constants
-from ..photon_source import PhotonSourceType
 from .utils import sources_to_model_input, sources_to_model_input_per_module
 
 
-def make_generate_norm_flow_photons(shape_model_path, counts_model_path):
+def make_generate_norm_flow_photons(shape_model_path, counts_model_path, c_medium):
     shape_config, shape_params = pickle.load(open(shape_model_path, "rb"))
     counts_config, counts_params = pickle.load(open(counts_model_path, "rb"))
 
@@ -52,7 +50,6 @@ def make_generate_norm_flow_photons(shape_model_path, counts_model_path):
         source_dir,
         source_time,
         source_nphotons,
-        c_medium,
         seed=31337,
     ):
 

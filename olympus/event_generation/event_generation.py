@@ -17,6 +17,7 @@ from .detector import (
 from .lightyield import make_pointlike_cascade_source, make_realistic_cascade_source
 from .mc_record import MCRecord
 from .photon_source import PhotonSource
+from .photon_propagation.utils import source_array_to_sources
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +42,7 @@ def simulate_noise(det, event):
 
 def generate_cascade(
     det,
-    pos,
-    t0,
-    dir,
-    energy,
-    particle_id,
+    event_data,
     seed,
     pprop_func,
     converter_func,
@@ -56,15 +53,8 @@ def generate_cascade(
     Parameters:
         det: Detector
             Instance of Detector class
-        pos: np.ndarray
-            Position (x, y, z) of the cascade
-        t0: float
-            Time of the cascade
-        dir: float
-            Direction of the cascade
-        energy: float
-            Energy of the cascade
-        particle_id: int
+        event_data: dict
+            Container of the event data
         seed: int
         pprop_func: function
             Function to calculate the photon signal
@@ -76,12 +66,18 @@ def generate_cascade(
     k1, k2 = random.split(seed)
 
     source_pos, source_dir, source_time, source_nphotons = converter_func(
-        pos, t0, dir, energy, particle_id, key=k1
+        event_data["pos"],
+        event_data["time"],
+        event_data["dir"],
+        event_data["energy"],
+        event_data["particle_id"],
+        key=k1,
     )
+
     record = MCRecord(
         "cascade",
-        None,  # TODO
-        {"energy": energy, "position": pos, "direction": dir, "time": t0},
+        source_array_to_sources(source_pos, source_dir, source_time, source_nphotons),
+        event_data,
     )
 
     propagation_result = pprop_func(
