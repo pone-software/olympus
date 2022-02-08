@@ -198,6 +198,7 @@ def make_triang(
     dist_z=50,
     dark_noise_rate=16 * 1e-5,
     rng=np.random.RandomState(0),
+    efficiency=0.5,
 ):
 
     height = np.sqrt(side_len ** 2 - (side_len / 2) ** 2)
@@ -210,7 +211,7 @@ def make_triang(
         rng,
         dark_noise_rate,
         0,
-        efficiency=0.3,
+        efficiency=efficiency,
     )
     modules += make_line(
         side_len / 2,
@@ -220,7 +221,7 @@ def make_triang(
         rng,
         dark_noise_rate,
         1,
-        efficiency=0.3,
+        efficiency=efficiency,
     )
     modules += make_line(
         0,
@@ -230,7 +231,7 @@ def make_triang(
         rng,
         dark_noise_rate,
         2,
-        efficiency=0.3,
+        efficiency=efficiency,
     )
 
     det = Detector(modules)

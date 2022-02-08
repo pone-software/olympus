@@ -33,6 +33,7 @@ from olympus.event_generation.detector import (
 parser = argparse.ArgumentParser()
 parser.add_argument("-s", "--spacing", type=float, required=True)
 parser.add_argument("-e", "--energy", type=float, required=True)
+parser.add_argument("--pmts", type=int, required=True)
 parser.add_argument("-o", "--outfile", type=str, required=True)
 parser.add_argument("--shape_model", type=str, required=True)
 parser.add_argument("--counts_model", type=str, required=True)
@@ -55,9 +56,15 @@ gen_ph = make_generate_norm_flow_photons(args.shape_model, args.counts_model)
 lh_per_mod = make_nflow_photon_likelihood_per_module(
     args.shape_model, args.counts_model
 )
+pmts_per_module = args.pmts
+pmt_cath_area_r = 75E-3 / 2 # m
+module_radius = 0.21 # m
+
+# Calculate the relative area covered by PMTs
+efficiency = pmts_per_module * (pmt_cath_area_r)**2 * np.pi / (4*np.pi*module_radius**2)
 
 rng = np.random.RandomState(args.seed)
-det = make_triang(args.spacing, 20, 50, dark_noise_rate, rng)
+det = make_triang(args.spacing, 20, 50, dark_noise_rate, rng, efficiency=efficiency)
 radius, height = det.outer_cylinder
 
 event_pos = sample_cylinder_volume(height, radius, 1, rng).squeeze()

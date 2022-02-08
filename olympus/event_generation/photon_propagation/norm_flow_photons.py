@@ -79,6 +79,7 @@ def make_generate_norm_flow_photons(shape_model_path, counts_model_path, c_mediu
             (source_pos.shape[0] * module_coords.shape[0], time_geo.shape[-1])
         )
         source_photons = jnp.tile(source_nphotons, module_coords.shape[0]).T.ravel()
+        mod_eff_factor = jnp.repeat(module_efficiencies, source_pos.shape[0])
 
         # Normalizing flows only built up to 300
         # TODO: Check lower bound as well
@@ -87,14 +88,16 @@ def make_generate_norm_flow_photons(shape_model_path, counts_model_path, c_mediu
         inp_params_masked = inp_pars[distance_mask]
         time_geo_masked = time_geo[distance_mask]
         source_photons_masked = source_photons[distance_mask]
+        mod_eff_factor_masked = mod_eff_factor[distance_mask]
 
         # Eval count net to obtain survival fraction
         ph_frac = jnp.power(
             10, counts_net.apply(counts_params, inp_params_masked)
         ).squeeze()
 
-        # Sample number of detected photon
-        n_photons_masked = ph_frac * source_photons_masked
+        # Sample number of detected photons
+        n_photons_masked = ph_frac * source_photons_masked * mod_eff_factor_masked
+
         key, subkey = random.split(key)
         n_photons_masked = random.poisson(
             subkey, n_photons_masked, shape=n_photons_masked.shape
