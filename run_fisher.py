@@ -115,5 +115,5 @@ pickle.dump(
         "phi": phi,
         "fisher": fisher,
     },
-    args.outfile,
+    open(args.outfile, "wb"),
 )
