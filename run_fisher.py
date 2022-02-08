@@ -57,11 +57,13 @@ lh_per_mod = make_nflow_photon_likelihood_per_module(
     args.shape_model, args.counts_model
 )
 pmts_per_module = args.pmts
-pmt_cath_area_r = 75E-3 / 2 # m
-module_radius = 0.21 # m
+pmt_cath_area_r = 75e-3 / 2  # m
+module_radius = 0.21  # m
 
 # Calculate the relative area covered by PMTs
-efficiency = pmts_per_module * (pmt_cath_area_r)**2 * np.pi / (4*np.pi*module_radius**2)
+efficiency = (
+    pmts_per_module * (pmt_cath_area_r) ** 2 * np.pi / (4 * np.pi * module_radius ** 2)
+)
 
 rng = np.random.RandomState(args.seed)
 det = make_triang(args.spacing, 20, 50, dark_noise_rate, rng, efficiency=efficiency)
@@ -99,13 +101,14 @@ fisher = calc_fisher_info_cascades(
     n_ev=50,
 )
 
-pickle.dump({
-    "spacing": args.spacing,
-    "energy": args.energy,
-    "position": event_pos,
-    "theta": theta,
-    "phi": phi,
-    "fisher": fisher
-    }
+pickle.dump(
+    {
+        "spacing": args.spacing,
+        "energy": args.energy,
+        "position": event_pos,
+        "theta": theta,
+        "phi": phi,
+        "fisher": fisher,
+    },
     args.outfile,
 )
