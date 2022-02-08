@@ -10,8 +10,8 @@ from ..event_generation.event_generation import (
     generate_realistic_track,
     simulate_noise,
 )
-from ..event_generation.utils import proposal_setup
-from ..utils import rotate_to_new_direc_v, sph_to_cart_jnp
+from ..event_generation.utils import proposal_setup, sph_to_cart_jnp
+from ..utils import rotate_to_new_direc_v
 
 
 def pad_event(event):
