@@ -37,7 +37,7 @@ def calc_fisher_info_cascades(
         dir = sph_to_cart_jnp(theta, phi)
 
         sources = converter(
-            pos, t, dir, 10 ** log10e, particle_id=event_data["pid"], key=key
+            pos, t, dir, 10 ** log10e, particle_id=event_data["particle_id"], key=key
         )
 
         return lh_func(
@@ -53,18 +53,12 @@ def calc_fisher_info_cascades(
 
     eval_jacobian = jax.jit(jax.jacobian(eval_for_mod, [0, 1, 2, 3, 4, 5, 6]))
 
-    event_dir = sph_to_cart_jnp(event_data["theta"], event_data["phi"])
-
     matrices = []
     for _ in range(n_ev):
         key, k1, k2 = random.split(key, 3)
         event, _ = generate_cascade(
             det,
-            event_data["pos"],
-            event_data["t0"],
-            event_dir,
-            energy=event_data["energy"],
-            particle_id=event_data["pid"],
+            event_data,
             pprop_func=ph_prop,
             seed=k1,
             converter_func=converter,
@@ -84,7 +78,7 @@ def calc_fisher_info_cascades(
                     event_data["pos"][2],
                     event_data["theta"],
                     event_data["phi"],
-                    event_data["t0"],
+                    event_data["time"],
                     np.log10(event_data["energy"]),
                     padded[j],
                     det.module_coords[j],

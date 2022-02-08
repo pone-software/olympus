@@ -2,12 +2,13 @@ import os
 import argparse
 import pickle
 
+from olympus.event_generation.utils import sph_to_cart_jnp
+
 os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.8"
 import functools
 
 import numpy as np
 from jax import random
-from jax.config import config
 from olympus.event_generation.detector import make_rhombus, make_triang
 from olympus.event_generation.lightyield import (
     make_pointlike_cascade_source,
@@ -51,7 +52,9 @@ def c_medium_f(wl):
 
 dark_noise_rate = 16 * 1e4 * 1e-9  # 1/ns
 
-gen_ph = make_generate_norm_flow_photons(args.shape_model, args.counts_model)
+gen_ph = make_generate_norm_flow_photons(
+    args.shape_model, args.counts_model, c_medium=c_medium_f(700) / 1e9
+)
 
 lh_per_mod = make_nflow_photon_likelihood_per_module(
     args.shape_model, args.counts_model
@@ -76,26 +79,28 @@ theta = np.arccos(event_dir[2])
 phi = np.arccos(event_dir[0] / np.sin(theta))
 
 event_data = {
-    "t0": 0.0,
+    "time": 0.0,
     "theta": theta,
     "phi": phi,
     "pos": event_pos,
     "energy": args.energy,
-    "pid": 11,
+    "particle_id": 11,
 }
+
+event_data["dir"] = sph_to_cart_jnp(event_data["theta"], event_data["phi"])
 
 
 converter = functools.partial(
     make_realistic_cascade_source, resolution=0.3, moliere_rand=True
 )
-ph_prop = functools.partial(gen_ph, c_medium=c_medium_f(700) / 1e9)
+ph_prop = functools.partial(gen_ph)
 
 fisher = calc_fisher_info_cascades(
     det,
     event_data,
     random.PRNGKey(args.seed),
     converter,
-    ph_prop,
+    gen_ph,
     lh_per_mod,
     c_medium=c_medium_f(700) / 1e9,
     n_ev=50,
