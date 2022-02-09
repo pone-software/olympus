@@ -114,6 +114,7 @@ pickle.dump(
         "theta": theta,
         "phi": phi,
         "fisher": fisher,
+        "pmts": args.pmts,
     },
     open(args.outfile, "wb"),
 )
