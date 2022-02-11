@@ -13,9 +13,9 @@ data = []
 for f in args.infiles:
 
     # Hotfix
-    pmts = re.match(".*_([0-9]*)_", f).groups()[0]
+    # pmts = re.match(".*_([0-9]*)_", f).groups()[0]
     d = pickle.load(open(f, "rb"))
-    d["pmts"] = int(pmts)
+    # d["pmts"] = int(pmts)
     data.append(d)
 
 pickle.dump(data, open(args.outfile, "wb"))
