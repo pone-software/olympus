@@ -140,7 +140,10 @@ def make_generate_norm_flow_photons(shape_model_path, counts_model_path, c_mediu
 
 
 def make_nflow_photon_likelihood_per_module(
-    shape_model_path, counts_model_path, split_shape_counts=False
+    shape_model_path,
+    counts_model_path,
+    split_shape_counts=False,
+    only_counts=False,
 ):
     shape_config, shape_params = pickle.load(open(shape_model_path, "rb"))
     counts_config, counts_params = pickle.load(open(counts_model_path, "rb"))
@@ -211,6 +214,9 @@ def make_nflow_photon_likelihood_per_module(
         counts_lh = jnp.sum(
             -n_ph_pred_per_mod_total + n_ph_meas * jnp.log(n_ph_pred_per_mod_total)
         )
+
+        if only_counts:
+            return counts_lh
 
         traf_params = apply_fn(shape_params, inp_pars)
         traf_params = traf_params.reshape((source_pos.shape[0], traf_params.shape[-1]))

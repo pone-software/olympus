@@ -1,4 +1,5 @@
 """Event Generators."""
+import functools
 import logging
 
 import awkward as ak
@@ -6,7 +7,6 @@ import jax.numpy as jnp
 import numpy as np
 from jax import random
 from tqdm.auto import trange
-
 from .constants import Constants
 from .detector import (
     generate_noise,
@@ -16,8 +16,9 @@ from .detector import (
 )
 from .lightyield import make_pointlike_cascade_source, make_realistic_cascade_source
 from .mc_record import MCRecord
-from .photon_source import PhotonSource
 from .photon_propagation.utils import source_array_to_sources
+from .photon_source import PhotonSource
+from .utils import track_isects_cyl
 
 logger = logging.getLogger(__name__)
 
@@ -95,39 +96,47 @@ def generate_cascade(
 
 def generate_cascades(
     det,
-    height,
-    radius,
+    cylinder_height,
+    cylinder_radius,
     nsamples,
     seed,
     log_emin,
     log_emax,
+    particle_id,
     pprop_func,
-    pprop_extras=None,
+    converter_func,
     noise_function=simulate_noise,
 ):
     """Generate a sample of cascades, randomly sampling the positions in a cylinder of given radius and length."""
     rng = np.random.RandomState(seed)
+    key = random.PRNGKey(seed)
 
     events = []
     records = []
 
     for i in trange(nsamples):
-        pos = sample_cylinder_volume(height, radius, 1, rng).squeeze()
+        pos = sample_cylinder_volume(cylinder_height, cylinder_radius, 1, rng).squeeze()
         energy = np.power(10, rng.uniform(log_emin, log_emax))
         dir = sample_direction(1, rng).squeeze()
 
+        event_data = {
+            "pos": pos,
+            "dir": dir,
+            "energy": energy,
+            "time": 0,
+            "particle_id": particle_id,
+        }
+
+        key, subkey = random.split(key)
         event, record = generate_cascade(
             det,
-            pos,
-            0,
-            dir,
-            energy=energy,
-            seed=seed + i,
-            pprop_func=pprop_func,
-            pprop_extras=pprop_extras,
+            event_data,
+            subkey,
+            pprop_func,
+            converter_func,
         )
         if noise_function is not None:
-            event = noise_function(det, event)
+            event, _ = noise_function(det, event)
 
         events.append(event)
         records.append(record)
@@ -136,7 +145,15 @@ def generate_cascades(
 
 
 def generate_muon_energy_losses(
-    propagator, energy, track_len, position, direction, time
+    propagator,
+    energy,
+    track_len,
+    position,
+    direction,
+    time,
+    key,
+    loss_resolution=0.2,
+    cont_resolution=1,
 ):
     try:
         import proposal as pp
@@ -157,6 +174,14 @@ def generate_muon_energy_losses(
     astime = []
     asph = []
 
+    loss_map = {
+        "brems": 11,
+        "epair": 11,
+        "hadrons": 211,
+        "ioniz": 11,
+        "photonuclear": 211,
+    }
+
     # harvest losses
     for loss in track.stochastic_losses():
         # dist = loss.position.z / 100
@@ -173,14 +198,24 @@ def generate_muon_energy_losses(
         dir = np.asarray([loss.direction.x, loss.direction.y, loss.direction.z])
         t = np.linalg.norm(p - position) / Constants.c_vac + time
 
-        # TODO: Switch on loss type
+        loss_type_name = pp.particle.Interaction_Type(loss.type).name
+        ptype = loss_map[loss_type_name]
+
         if e_loss < 1e3:
             spos, sdir, stime, sph = make_pointlike_cascade_source(
-                p, t, dir, e_loss, 11
+                p, t, dir, e_loss, ptype
             )
         else:
+            key, subkey = random.split(key)
             spos, sdir, stime, sph = make_realistic_cascade_source(
-                p, t, dir, e_loss, 11
+                p,
+                t,
+                dir,
+                e_loss,
+                ptype,
+                subkey,
+                resolution=loss_resolution,
+                moliere_rand=True,
             )
 
         aspos.append(spos)
@@ -188,125 +223,147 @@ def generate_muon_energy_losses(
         astime.append(stime)
         asph.append(sph)
 
+    # distribute continuous losses uniformly along track
+    # TODO: check if thats a good approximation
+    # TODO: track segments
+
+    cont_loss_sum = sum([loss.energy for loss in track.continuous_losses()]) / 1e3
+    total_dist = track.track_propagated_distances()[-1] / 100
+    loss_dists = np.arange(0, total_dist, cont_resolution)
+    e_loss = cont_loss_sum / len(loss_dists)
+
+    for ld in loss_dists:
+        p = ld * direction + position
+        t = np.linalg.norm(p - position) / Constants.c_vac + time
+
+        spos, sdir, stime, sph = make_pointlike_cascade_source(
+            p, t, direction, e_loss, 11
+        )
+
+        aspos.append(spos)
+        asdir.append(sdir)
+        astime.append(stime)
+        asph.append(sph)
+
+    if not aspos:
+        return None, None, None, None, total_dist
+
     return (
-        jnp.concatenate(aspos),
-        jnp.concatenate(asdir),
-        jnp.concatenate(astime),
-        jnp.concatenate(asph),
-        track.track_propagated_distances()[-1] / 100,
+        np.concatenate(aspos),
+        np.concatenate(asdir),
+        np.concatenate(astime),
+        np.concatenate(asph),
+        total_dist,
     )
 
 
 def generate_realistic_track(
     det,
-    pos,
-    direc,
-    track_len,
-    energy,
-    t0,
-    seed,
+    event_data,
+    key,
     pprop_func,
-    pprop_extras=None,
-    propagator=None,
+    proposal_prop,
 ):
     """
     Generate a realistic track using energy losses from PROPOSAL.
 
     Parameters:
-      det: Detector
-        Instance of Detector class
-      pos: np.ndarray
-        Position (x, y, z) of the track at t0
-      direc: np.ndarray
-        Direction (dx, dy, dz) of the track
-      track_len: float
-        Length of the track
-      energy: float
-        Initial energy of the track
-      t0: float
-        Time at position `pos`
-      seed: int
-      rng: RandomState
-      propagator: Proposal propagator
-      kwargs: dict
-         kwargs passed to `generate_photons`
+        det: Detector
+            Instance of Detector class
+        event_data: dict
+            Container of the event data
+        seed: PRNGKey
+        pprop_func: function
+            Function to calculate the photon signal
+        proposal_prop: function
+            Propoposal propagator
     """
 
-    if propagator is None:
+    if proposal_prop is None:
         raise RuntimeError()
 
-    if pprop_extras is None:
-        pprop_extras = {}
-
+    key, k1, k2 = random.split(key, 3)
     (
         source_pos,
         source_dir,
         source_time,
         source_photons,
         prop_dist,
-    ) = generate_muon_energy_losses(propagator, energy, track_len, pos, direc, t0)
+    ) = generate_muon_energy_losses(
+        proposal_prop,
+        event_data["energy"],
+        event_data["length"],
+        event_data["pos"],
+        event_data["dir"],
+        event_data["time"],
+        k1,
+    )
+    event_data["length"] = prop_dist
+
+    if source_pos is None:
+        return None, None
+
+    # early mask sources that are out of reach
+
+    dist_matrix = np.linalg.norm(
+        source_pos[:, np.newaxis, ...] - det.module_coords[np.newaxis, ...], axis=-1
+    )
+
+    mask = np.any(dist_matrix < 300, axis=1)
+    source_pos = source_pos[mask]
+    source_dir = source_dir[mask]
+    source_time = source_time[mask]
+    source_photons = source_photons[mask]
 
     record = MCRecord(
         "realistic_track",
-        None,
-        {
-            "position": pos,
-            "energy": energy,
-            "track_len": prop_dist,
-            "direction": direc,
-        },
+        source_array_to_sources(source_pos, source_dir, source_time, source_photons),
+        event_data,
     )
 
-    hit_times = ak.sort(
-        ak.Array(
-            pprop_func(
-                det.module_coords,
-                det.module_efficiencies,
-                source_pos,
-                source_dir,
-                source_time,
-                source_photons,
-                seed=seed,
-                **pprop_extras
-            )
-        )
+    propagation_result = pprop_func(
+        det.module_coords,
+        det.module_efficiencies,
+        source_pos,
+        source_dir,
+        source_time,
+        source_photons,
+        seed=k2,
     )
-    return hit_times, record
+    return propagation_result, record
 
 
 def generate_realistic_tracks(
     det,
-    height,
-    radius,
+    cylinder_height,
+    cylinder_radius,
     nsamples,
     seed,
     log_emin,
     log_emax,
     pprop_func,
-    propagator=None,
-    pprop_extras=None,
+    proposal_prop=None,
 ):
     """Generate realistic muon tracks."""
     rng = np.random.RandomState(seed)
-    # Safe length to that tracks will appear infinite
-    # TODO: Calculate intersection with generation cylinder
-    track_length = 3000
+    key = random.PRNGKey(seed)
 
     events = []
     records = []
-    noises = []
 
     for i in trange(nsamples):
-        pos = sample_cylinder_surface(height, radius, 1, rng).squeeze()
+        pos = sample_cylinder_surface(
+            cylinder_height, cylinder_radius, 1, rng
+        ).squeeze()
         energy = np.power(10, rng.uniform(log_emin, log_emax, size=1))
 
         # determine the surface normal vectors given the samples position
         # surface normal always points out
 
-        if pos[2] == height / 2:
+        if pos[2] == cylinder_height / 2:
             # upper cap
             area_norm = np.array([0, 0, 1])
-        elif pos[2] == -height / 2:
+        elif pos[2] == -cylinder_height / 2:
             # lower cap
             area_norm = np.array([0, 0, -1])
         else:
@@ -323,44 +380,53 @@ def generate_realistic_tracks(
         # shift pos back by half the length:
         # pos = pos - track_length / 2 * direc
 
+        isec = track_isects_cyl(
+            det._outer_cylinder[0], det._outer_cylinder[1], pos, direc
+        )
+        track_length = 3000
+        if (isec[0] != np.nan) and (isec[1] != np.nan):
+            track_length = isec[1] - isec[0] + 300
+
+        event_data = {
+            "pos": pos,
+            "dir": direc,
+            "energy": energy,
+            "time": 0,
+            "length": track_length,
+        }
+
+        key, subkey = random.split(key)
         result = generate_realistic_track(
             det,
-            pos,
-            direc,
-            track_length,
-            energy=energy,
-            t0=0,
-            seed=seed + i,
-            rng=rng,
-            propagator=propagator,
-            pprop_func=generate_photons,
-            pprop_extras=pprop_extras,
+            event_data,
+            key=subkey,
+            proposal_prop=proposal_prop,
+            pprop_func=pprop_func,
         )
 
         event, record = result
-        event, noise = simulate_noise(det, event)
+        event, _ = simulate_noise(det, event)
 
-        noises.append(noise)
         events.append(event)
         records.append(record)
 
-    return events, records, noises
+    return events, records
 
 
 def generate_realistic_starting_tracks(
     det,
-    height,
-    radius,
+    cylinder_height,
+    cylinder_radius,
     nsamples,
     seed,
     log_emin,
     log_emax,
-    propagator=None,
-    pprop_func=None,
-    pprop_extras=None,
+    pprop_func,
+    proposal_prop=None,
 ):
     """Generate realistic starting tracks (cascade + track)."""
     rng = np.random.RandomState(seed)
+    key, subkey = random.split(random.PRNGKey(seed))
     # Safe length to that tracks will appear infinite
     # TODO: Calculate intersection with generation cylinder
     track_length = 3000
@@ -369,134 +435,59 @@ def generate_realistic_starting_tracks(
     records = []
 
     for i in trange(nsamples):
-        pos = sample_cylinder_volume(height, radius, 1, rng).squeeze()
+        pos = sample_cylinder_volume(cylinder_height, cylinder_radius, 1, rng).squeeze()
         energy = np.power(10, rng.uniform(log_emin, log_emax))
         direc = sample_direction(1, rng).squeeze()
         inelas = rng.uniform(1e-6, 1 - 1e-6)
 
+        event_data = {
+            "pos": pos,
+            "dir": direc,
+            "energy": inelas * energy,
+            "time": 0,
+            "length": track_length,
+        }
+
         track, track_record = generate_realistic_track(
             det,
-            pos,
-            direc,
-            track_length,
-            energy=energy * inelas,
-            t0=0,
-            seed=seed + i,
-            rng=rng,
-            propagator=propagator,
-            pprop_func=generate_photons,
-            pprop_extras=pprop_extras,
+            event_data,
+            key=subkey,
+            proposal_prop=proposal_prop,
+            pprop_func=pprop_func,
         )
+
+        event_data = {
+            "pos": pos,
+            "dir": direc,
+            "energy": (1 - inelas) * energy,
+            "time": 0,
+            "length": track_length,
+            "particle_id": 211,
+        }
+
         cascade, cascade_record = generate_cascade(
             det,
-            pos,
-            t0=0,
-            seed=seed + 1,
-            energy=energy * (1 - inelas),
-            pprop_func=generate_photons,
-            pprop_extras=pprop_extras,
+            event_data,
+            subkey,
+            pprop_func,
+            functools.partial(
+                make_realistic_cascade_source, moliere_rand=True, resolution=0.2
+            ),
         )
 
-        event = ak.sort(ak.concatenate([track, cascade], axis=1))
+        if (ak.count(track) == 0) & (ak.count(cascade) == 0):
+            event = ak.Array([])
+
+        elif ak.count(track) == 0:
+            event = cascade
+        elif (ak.count(cascade)) == 0:
+            event = track
+        else:
+            event = ak.sort(ak.concatenate([track, cascade], axis=1))
         record = track_record + cascade_record
 
-        event = simulate_noise(det, event)
+        event, _ = simulate_noise(det, event)
         events.append(event)
         records.append(record)
 
-    return events, records
-
-
-def generate_uniform_track(
-    det, pos, direc, track_len, energy, t0=0, res=10, seed=31337
-):
-    """
-    Generate a track approximated by cascades at fixed intervals.
-
-    Parameters:
-      det: Detector
-        Instance of Detector class
-      pos: np.ndarray
-        Position (x, y, z) of the track at t0
-      direc: np.ndarray
-        Direction (dx, dy, dz) of the track
-      track_len: float
-        Length of the track
-      energy: float
-        Energy of each individual cascade
-      t0: float
-        Time at position `pos`
-      res: float
-        Distance of cascades along the track [m]
-      seed: float
-
-    """
-    sources = []
-
-    for i in np.arange(0, track_len, res):
-        p = pos + i * direc
-
-        # Check if this position is way outside of the detector.
-        # In that case: ignore
-
-        if np.linalg.norm(p) > det.outer_radius + 3 * Constants.lambda_abs:
-            continue
-
-        t = i / Constants.c_vac + t0
-        sources.append(PhotonSource(p, energy * Constants.photons_per_GeV, t))
-
-    record = MCRecord(
-        "uniform_track",
-        dejit_sources(sources),
-        {"position": pos, "energy": energy, "track_len": track_len, "direction": direc},
-    )
-    hit_times = ak.sort(
-        ak.Array(
-            generate_photons(
-                det.module_coords, det.module_efficiencies, List(sources), seed=seed
-            )
-        )
-    )
-    return hit_times, record
-
-
-def generate_uniform_tracks(
-    det,
-    height,
-    radius,
-    nsamples,
-    seed=31337,
-):
-    rng = np.random.RandomState(seed)
-    # Safe length to that tracks will appear infinite
-    # TODO: Calculate intersection with generation cylinder
-    track_length = 3000
-
-    positions = sample_cylinder_surface(height, radius, nsamples, rng)
-    directions = sample_direction(nsamples, rng)
-
-    # Sample amplitude uniform in log
-    amplitudes = np.power(10, rng.uniform(0, 4, size=nsamples))
-
-    events = []
-    records = []
-
-    for i, (pos, amp, direc) in enumerate(zip(positions, amplitudes, directions)):
-
-        # shift pos back by half the length:
-        pos = pos - track_length / 2 * direc
-
-        event, record = generate_uniform_track(
-            det, pos, direc, track_length, amp, 0, 10, seed + i
-        )
-        if ak.count(event) == 0:
-            continue
-        time_range = [
-            ak.min(ak.flatten(event)) - 1000,
-            ak.max(ak.flatten(event)) + 5000,
-        ]
-        noise = generate_noise(det, time_range)
-        event = ak.sort(ak.concatenate([event, noise], axis=1))
-        events.append(event)
-        records.append(record)
     return events, records

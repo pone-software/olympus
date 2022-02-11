@@ -27,7 +27,14 @@ def pad_event(event):
 
 
 def calc_fisher_info_cascades(
-    det, event_data, key, converter, ph_prop, lh_func, c_medium, n_ev=20
+    det,
+    event_data,
+    key,
+    converter,
+    ph_prop,
+    lh_func,
+    c_medium,
+    n_ev=20,
 ):
     def eval_for_mod(
         x, y, z, theta, phi, t, log10e, times, mod_coords, noise_rate, key
