@@ -22,7 +22,7 @@ def pad_event(event):
         raise RuntimeError()
     padded = ak.pad_none(event, target=pad_len, clip=True, axis=1)
     # mask = ak.is_none(padded, axis=1)
-    ev_np = np.asarray((ak.fill_none(padded, -np.inf)))
+    ev_np = np.asarray((ak.fill_none(padded, np.inf)))
     return ev_np
 
 

@@ -143,7 +143,7 @@ def make_nflow_photon_likelihood_per_module(
     shape_model_path,
     counts_model_path,
     split_shape_counts=False,
-    only_counts=False,
+    mode="full",
 ):
     shape_config, shape_params = pickle.load(open(shape_model_path, "rb"))
     counts_config, counts_params = pickle.load(open(counts_model_path, "rb"))
@@ -215,7 +215,7 @@ def make_nflow_photon_likelihood_per_module(
             -n_ph_pred_per_mod_total + n_ph_meas * jnp.log(n_ph_pred_per_mod_total)
         )
 
-        if only_counts:
+        if mode == "counts":
             return counts_lh
 
         traf_params = apply_fn(shape_params, inp_pars)
@@ -232,6 +232,12 @@ def make_nflow_photon_likelihood_per_module(
         physical = t_res > -4
 
         mask = distance_mask & finite_times & physical
+
+        if mode == "tfirst":
+            # only select the first measured photon
+            first_mask = jnp.zeros_like(mask)
+            first_mask = first_mask.at[jnp.argmin(t_res, axis=1), :].set(True)
+            mask = mask & first_mask
 
         traf_params = traf_params.reshape(
             (traf_params.shape[0], 1, traf_params.shape[1])

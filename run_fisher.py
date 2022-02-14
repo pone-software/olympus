@@ -39,7 +39,8 @@ parser.add_argument("-o", "--outfile", type=str, required=True)
 parser.add_argument("--shape_model", type=str, required=True)
 parser.add_argument("--counts_model", type=str, required=True)
 parser.add_argument("--seed", type=int, required=True)
-parser.add_argument("--only_counts", action="store_true")
+parser.add_argument("--mode", choices=["full", "counts", "tfirst"], required=True)
+
 args = parser.parse_args()
 
 ref_index_func = cascadia_ref_index_func
@@ -58,7 +59,7 @@ gen_ph = make_generate_norm_flow_photons(
 )
 
 lh_per_mod = make_nflow_photon_likelihood_per_module(
-    args.shape_model, args.counts_model, only_counts=args.only_counts
+    args.shape_model, args.counts_model, mode=args.mode
 )
 pmts_per_module = args.pmts
 pmt_cath_area_r = 75e-3 / 2  # m

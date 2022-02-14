@@ -1,5 +1,5 @@
 import jax.numpy as jnp
-from jax.lax import Precision, cond
+from jax.lax import Precision
 import jax
 
 
