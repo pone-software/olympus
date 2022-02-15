@@ -3,13 +3,20 @@ import htcondor.dags
 import classad
 import numpy as np
 from itertools import product
+from argparse import ArgumentParser
 
-dag = htcondor.dags.DAG()
+parser = ArgumentParser()
+parser.add_argument("--shape-model", required=True, dest="shape_model")
+parser.add_argument("--counts-model", required=True, dest="counts_model")
+parser.add_argument("-o", required=True, dest="outfolder")
+parser.add_argument("--dag-dir", required=True, dest="dag_dir")
+parser.add_argument("--singularity-image", required=True, dest="simage")
 
-shape_model_path = "/data/p-one/chaack/hyperion/data/photon_tfirst_nflow_params.pickle"
-counts_model_path = (
-    "/data/p-one/chaack/hyperion/data/photon_arrival_time_counts_params.pickle"
-)
+args = parser.parse_args()
+
+
+shape_model_path = args.shape_model
+counts_model_path = args.counts_model
 
 outfile_path = "fisher_$(spacing)_$(energy)_$(pmts)_$(seed)_tfirst.npz"
 
@@ -24,7 +31,7 @@ description = htcondor.Submit(
     should_transfer_files="YES",
     when_to_transfer_output="ON_EXIT",
 )
-description["+SingularityImage"] = classad.quote("/data/p-one/pytorch-geo.sif")
+description["+SingularityImage"] = classad.quote(args.simage)
 
 spacings = np.linspace(50, 200, 7)
 energies = np.logspace(3, 5.5, 7)
@@ -35,11 +42,13 @@ dagvars = []
 for spacing, energy, seed, pmt in product(spacings, energies, seeds, pmts):
     dagvars.append({"spacing": spacing, "energy": energy, "seed": seed, "pmts": pmt})
 
+dag = htcondor.dags.DAG()
+
 layer = dag.layer(
     name="fisher",
     submit_description=description,
     vars=dagvars,
 )
 
-dag_dir = "/scratch/chaack/condor"
-dag_file = htcondor.dags.write_dag(dag, dag_dir, dag_file_name="fisher.dag")
+
+dag_file = htcondor.dags.write_dag(dag, args.dag_dir, dag_file_name="fisher.dag")
