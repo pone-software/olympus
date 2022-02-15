@@ -11,18 +11,24 @@ parser.add_argument("--counts-model", required=True, dest="counts_model")
 parser.add_argument("-o", required=True, dest="outfolder")
 parser.add_argument("--dag-dir", required=True, dest="dag_dir")
 parser.add_argument("--singularity-image", required=True, dest="simage")
+parser.add_argument("--for-slurm", action="store_true", dest="for_slurm")
+parser.add_argument("--repo-path", required=True, dest="repo_path")
 
 args = parser.parse_args()
 
-
-shape_model_path = args.shape_model
-counts_model_path = args.counts_model
-
 outfile_path = "fisher_$(spacing)_$(energy)_$(pmts)_$(seed)_tfirst.npz"
 
+if not args.for_slurm:
+    exec = f"{args.repo_path}/run.sh"
+    exec_args = f"python {args.repo_path}/olympus/run_fisher.py -o {outfile_path} -s $(spacing) -e $(energy) --seed $(seed) --shape_model {args.shape_model} --counts_model {args.counts_model} --pmts $(pmts) --mode tfirst",
+else:
+    exec = f"singularity run --nv {args.singularity_image}"
+    exec_args = f"PYTHONPATH={args.repo_path}/olympus:{args.repo_path}/hyperion python {args.repo_path}/olympus/run_fisher.py -o {outfile_path} -s $(spacing) -e $(energy) --seed $(seed) --shape_model {args.shape_model} --counts_model {args.counts_model} --pmts $(pmts) --mode tfirst",
+
+
 description = htcondor.Submit(
-    executable="/data/p-one/chaack/run.sh",  # the program we want to run
-    arguments=f"python /data/p-one/chaack/olympus/run_fisher.py -o {outfile_path} -s $(spacing) -e $(energy) --seed $(seed) --shape_model {shape_model_path} --counts_model {counts_model_path} --pmts $(pmts) --mode tfirst",
+    executable=exec,  # the program we want to run
+    arguments=exec_args
     log="logs/log",  # the HTCondor job event log
     output="logs/fisher.out.$(spacing)_$(energy)_$(seed)_$(pmts)",  # stdout from the job goes here
     error="logs/fisher.err.$(spacing)_$(energy)_$(seed)_$(pmts)",  # stderr from the job goes here
