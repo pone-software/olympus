@@ -1,10 +1,11 @@
+import os
+import stat
 import htcondor
 import htcondor.dags
 import classad
 import numpy as np
 from itertools import product
 from argparse import ArgumentParser
-import os
 
 parser = ArgumentParser()
 parser.add_argument("--shape-model", required=True, dest="shape_model")
@@ -17,30 +18,31 @@ parser.add_argument("--repo-path", required=True, dest="repo_path")
 
 args = parser.parse_args()
 
-outfile_path = "fisher_$(spacing)_$(energy)_$(pmts)_$(seed)_tfirst.npz"
+outfile_path = os.path.join(args.outfolder, "fisher_$(spacing)_$(energy)_$(pmts)_$(seed)_tfirst.npz")
 
-runsh_cont = f"""export PYTHONPATH={args.repo_path}/olympus:{args.repo_path}/hyperion
+
+runsh_cont = f"""ulimit -c 0
+export PYTHONPATH={args.repo_path}/olympus:{args.repo_path}/hyperion
 "$@"
 """
 runsh_file = os.path.join(args.repo_path, "run.sh")
 
-with open(runsh_file, "wb") as hdl:
+with open(runsh_file, "w") as hdl:
     hdl.write(runsh_cont)
 
-mode = os.stat(runsh_file).st_mode
-os.chmod(runsh_file, mode | 0o111)
+st = os.stat(runsh_file)
+os.chmod(runsh_file, st.st_mode | stat.S_IEXEC)
 
 if not args.for_slurm:
     exec = runsh_file
-    exec_args = f"python {args.repo_path}/olympus/run_fisher.py -o {outfile_path} -s $(spacing) -e $(energy) --seed $(seed) --shape_model {args.shape_model} --counts_model {args.counts_model} --pmts $(pmts) --mode tfirst",
+    exec_args = f"python {args.repo_path}/olympus/run_fisher.py -o {outfile_path} -s $(spacing) -e $(energy) --seed $(seed) --shape_model {args.shape_model} --counts_model {args.counts_model} --pmts $(pmts) --mode tfirst"
 else:
     exec = runsh_file
-    exec_args = f"singularity run --bind /mnt:/mnt --nv {args.singularity_image} python {args.repo_path}/olympus/run_fisher.py -o {outfile_path} -s $(spacing) -e $(energy) --seed $(seed) --shape_model {args.shape_model} --counts_model {args.counts_model} --pmts $(pmts) --mode tfirst",
-
+    exec_args = f"singularity exec --bind /mnt:/mnt --nv {args.simage} python {args.repo_path}/olympus/run_fisher.py -o {outfile_path} -s $(spacing) -e $(energy) --seed $(seed) --shape_model {args.shape_model} --counts_model {args.counts_model} --pmts $(pmts) --mode tfirst"
 
 description = htcondor.Submit(
     executable=exec,  # the program we want to run
-    arguments=exec_args
+    arguments=exec_args,
     log="logs/log",  # the HTCondor job event log
     output="logs/fisher.out.$(spacing)_$(energy)_$(seed)_$(pmts)",  # stdout from the job goes here
     error="logs/fisher.err.$(spacing)_$(energy)_$(seed)_$(pmts)",  # stderr from the job goes here
