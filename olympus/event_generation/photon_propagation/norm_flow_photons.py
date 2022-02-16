@@ -295,7 +295,7 @@ def make_nflow_photon_likelihood_per_module(
                 + jnp.log(1 - cumul) * n_measured
             )
 
-            return llh + counts_lh
+            return llh.sum() + counts_lh
 
     return eval_per_module_likelihood
 

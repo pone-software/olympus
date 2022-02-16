@@ -47,8 +47,6 @@ def calc_fisher_info_cascades(
         x, y, z, theta, phi, t, log10e, times, mod_coords, noise_rate, key
     ):
 
-        print("Retracing")
-
         pos = jnp.asarray([x, y, z])
         dir = sph_to_cart_jnp(theta, phi)
 
@@ -87,7 +85,6 @@ def calc_fisher_info_cascades(
         # padded = [np.asarray(event[j]) for j in range(len(event))]
         jacsum = 0
         for j in range(len(event)):
-
             padded = pad_array_log_bucket(event[j], pad_base)
             res = jnp.stack(
                 eval_jacobian(

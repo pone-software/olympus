@@ -40,7 +40,7 @@ parser.add_argument("--shape_model", type=str, required=True)
 parser.add_argument("--counts_model", type=str, required=True)
 parser.add_argument("--seed", type=int, required=True)
 parser.add_argument("--mode", choices=["full", "counts", "tfirst"], required=True)
-parser.add_argument("--pad_base", default=4, type=int, required=False)
+parser.add_argument("--pad_base", default=8, type=int, required=False)
 
 args = parser.parse_args()
 
