@@ -40,6 +40,7 @@ parser.add_argument("--shape_model", type=str, required=True)
 parser.add_argument("--counts_model", type=str, required=True)
 parser.add_argument("--seed", type=int, required=True)
 parser.add_argument("--mode", choices=["full", "counts", "tfirst"], required=True)
+parser.add_argument("--pad_base", default=4, type=int, required=False)
 
 args = parser.parse_args()
 
@@ -106,6 +107,7 @@ fisher = calc_fisher_info_cascades(
     lh_per_mod,
     c_medium=c_medium_f(700) / 1e9,
     n_ev=50,
+    pad_base=args.pad_base,
 )
 
 pickle.dump(

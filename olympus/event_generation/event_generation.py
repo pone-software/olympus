@@ -26,14 +26,14 @@ logger = logging.getLogger(__name__)
 def simulate_noise(det, event):
 
     if ak.count(event) == 0:
-        time_range = [-1000, 5000]
+        time_range = [-1000, 4000]
         noise = generate_noise(det, time_range)
         event = ak.sort(noise, axis=1)
 
     else:
         time_range = [
             ak.min(ak.flatten(event)) - 1000,
-            ak.max(ak.flatten(event)) + 5000,
+            ak.max(ak.flatten(event)) + 4000,
         ]
         noise = generate_noise(det, time_range)
         event = ak.sort(ak.concatenate([event, noise], axis=1))

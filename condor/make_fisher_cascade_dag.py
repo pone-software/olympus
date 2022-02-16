@@ -4,6 +4,7 @@ import classad
 import numpy as np
 from itertools import product
 from argparse import ArgumentParser
+import os
 
 parser = ArgumentParser()
 parser.add_argument("--shape-model", required=True, dest="shape_model")
@@ -18,12 +19,23 @@ args = parser.parse_args()
 
 outfile_path = "fisher_$(spacing)_$(energy)_$(pmts)_$(seed)_tfirst.npz"
 
+runsh_cont = f"""export PYTHONPATH={args.repo_path}/olympus:{args.repo_path}/hyperion
+"$@"
+"""
+runsh_file = os.path.join(args.repo_path, "run.sh")
+
+with open(runsh_file, "wb") as hdl:
+    hdl.write(runsh_cont)
+
+mode = os.stat(runsh_file).st_mode
+os.chmod(runsh_file, mode | 0o111)
+
 if not args.for_slurm:
-    exec = f"{args.repo_path}/run.sh"
+    exec = runsh_file
     exec_args = f"python {args.repo_path}/olympus/run_fisher.py -o {outfile_path} -s $(spacing) -e $(energy) --seed $(seed) --shape_model {args.shape_model} --counts_model {args.counts_model} --pmts $(pmts) --mode tfirst",
 else:
-    exec = f"singularity run --nv {args.singularity_image}"
-    exec_args = f"PYTHONPATH={args.repo_path}/olympus:{args.repo_path}/hyperion python {args.repo_path}/olympus/run_fisher.py -o {outfile_path} -s $(spacing) -e $(energy) --seed $(seed) --shape_model {args.shape_model} --counts_model {args.counts_model} --pmts $(pmts) --mode tfirst",
+    exec = runsh_file
+    exec_args = f"singularity run --bind /mnt:/mnt --nv {args.singularity_image} python {args.repo_path}/olympus/run_fisher.py -o {outfile_path} -s $(spacing) -e $(energy) --seed $(seed) --shape_model {args.shape_model} --counts_model {args.counts_model} --pmts $(pmts) --mode tfirst",
 
 
 description = htcondor.Submit(

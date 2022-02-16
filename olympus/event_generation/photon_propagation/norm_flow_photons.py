@@ -40,8 +40,26 @@ def make_generate_norm_flow_photons(shape_model_path, counts_model_path, c_mediu
 
     counts_net = make_counts_net_fn(counts_config)
 
+    """
     def sample_model(traf_params, key):
         return sample_shape_model(dist_builder, traf_params, traf_params.shape[0], key)
+    """
+
+    @jax.jit
+    def sample_model_inner(traf_params, key):
+        return sample_shape_model(dist_builder, traf_params, traf_params.shape[0], key)
+
+    def sample_model(traf_params, key):
+
+        base = 4
+        log_cnt = np.log(traf_params.shape[0]) / np.log(base)
+        pad_len = int(np.power(base, np.ceil(log_cnt)))
+
+        padded = jnp.pad(traf_params, ((0, pad_len - traf_params.shape[0]), (0, 0)))
+
+        result = sample_model_inner(padded, key)
+
+        return result[: traf_params.shape[0]]
 
     def generate_norm_flow_photons(
         module_coords,
@@ -142,7 +160,6 @@ def make_generate_norm_flow_photons(shape_model_path, counts_model_path, c_mediu
 def make_nflow_photon_likelihood_per_module(
     shape_model_path,
     counts_model_path,
-    split_shape_counts=False,
     mode="full",
 ):
     shape_config, shape_params = pickle.load(open(shape_model_path, "rb"))
@@ -174,8 +191,38 @@ def make_nflow_photon_likelihood_per_module(
     def eval_l_p(traf_params, samples):
         return eval_log_prob(dist_builder, traf_params, samples)
 
+    def per_module_shape_lh(t_res, inp_pars, source_weight):
+        traf_params = apply_fn(shape_params, inp_pars)
+        traf_params = traf_params.reshape((inp_pars.shape[0], traf_params.shape[-1]))
+
+        distance_mask = (inp_pars[..., 0] < np.log10(300))[:, np.newaxis]
+        finite_times = jnp.isfinite(t_res)
+        physical = t_res > -4
+
+        mask = distance_mask & finite_times & physical
+
+        traf_params = traf_params.reshape(
+            (traf_params.shape[0], 1, traf_params.shape[1])
+        )
+
+        # Sanitize likelihood evaluation to avoid nans.
+        sanitized_times = jnp.where(mask, t_res, jnp.zeros_like(t_res))
+        shape_lh = eval_l_p(traf_params, sanitized_times)
+
+        # Mask the scale factor. This will remove unwanted source-time pairs from the logsumexp
+        scale_factor = source_weight[:, np.newaxis] * mask + 1e-15
+
+        # logsumexp is log( sum_i b_i * (exp (a_i)))
+        shape_lh = jax.scipy.special.logsumexp(shape_lh, b=scale_factor, axis=0)
+
+        return shape_lh
+
+    # per_module_shape_lh_v = jax.vmap(per_module_shape_lh, in_axes=[0, None, None])
+    # per_module_shape_lh_v_j = jax.jit(jax.vmap(per_module_shape_lh, in_axes = [0, None, None]))
+
     def eval_per_module_likelihood(
-        times,
+        time,
+        n_measured,
         module_coords,
         source_pos,
         source_dir,
@@ -196,90 +243,59 @@ def make_nflow_photon_likelihood_per_module(
         inp_pars = inp_pars.reshape((source_pos.shape[0], inp_pars.shape[-1]))
         time_geo = time_geo.reshape((source_pos.shape[0], time_geo.shape[-1]))
 
+        t_res = time - time_geo
+
         ph_frac = jnp.power(10, counts_net_apply_fn(counts_params, inp_pars)).reshape(
             source_pos.shape[0]
         )
 
-        noise_window_len = 6000
+        noise_window_len = 5000
         noise_photons = noise_rate * noise_window_len
 
         n_photons = jnp.reshape(
             ph_frac * source_photons.squeeze(), (source_pos.shape[0],)
         )
+
         n_ph_pred_per_mod = jnp.sum(n_photons)
         n_ph_pred_per_mod_total = n_ph_pred_per_mod + noise_photons
 
-        n_ph_meas = jnp.isfinite(times).sum()
-
         counts_lh = jnp.sum(
-            -n_ph_pred_per_mod_total + n_ph_meas * jnp.log(n_ph_pred_per_mod_total)
+            -n_ph_pred_per_mod_total + n_measured * jnp.log(n_ph_pred_per_mod_total)
         )
 
-        if mode == "counts":
+        if mode == "counts" or time.shape[0] == 0:
             return counts_lh
 
-        traf_params = apply_fn(shape_params, inp_pars)
-        traf_params = traf_params.reshape((source_pos.shape[0], traf_params.shape[-1]))
+        def total_shape_lh(t_res):
+            source_weight = n_photons / jnp.sum(n_photons)
 
-        t_res = times - time_geo
+            shape_lh = per_module_shape_lh(t_res, inp_pars, source_weight)
+            noise_lh = -jnp.log(noise_window_len)
 
-        # We have several masks. First, we need to mask all source-module pairs which are not
-        # covered by the flow model (distance mask)
-        # Second, we have to mask non-finite times, which are created when padding the event.
-        # Last, we have to mask time-residuals < -4 (unphysical, will recieve penalty)
-        distance_mask = (inp_pars[..., 0] < np.log10(300))[:, np.newaxis]
-        finite_times = jnp.isfinite(t_res)
-        physical = t_res > -4
+            total_shape_lh = jnp.logaddexp(
+                noise_lh + jnp.log(noise_photons / n_ph_pred_per_mod_total),
+                shape_lh + jnp.log(n_ph_pred_per_mod / n_ph_pred_per_mod_total),
+            )
+            return total_shape_lh
 
-        mask = distance_mask & finite_times & physical
+        if mode == "full":
+            return total_shape_lh(t_res).sum() + counts_lh
 
-        if mode == "tfirst":
-            # only select the first measured photon
-            first_mask = jnp.zeros_like(mask)
-            first_mask = first_mask.at[jnp.argmin(t_res, axis=1), :].set(True)
-            mask = mask & first_mask
+        elif mode == "tfirst":
+            tfirst = jnp.min(time)
+            tvanilla = jnp.linspace(-1000, tfirst, 5000)
+            # tsamples = tvanilla / 5000 * (tfirst + 1000) - 1000
+            tsamples = tvanilla - time_geo
 
-        traf_params = traf_params.reshape(
-            (traf_params.shape[0], 1, traf_params.shape[1])
-        )
+            cumul = jnp.trapz(jnp.exp(total_shape_lh(tsamples)), x=tvanilla)
 
-        # Sanitize likelihood evaluation to avoid nans.
-        sanitized_times = jnp.where(mask, t_res, jnp.zeros_like(t_res))
-        shape_lh = eval_l_p(traf_params, sanitized_times)
+            llh = (
+                jnp.log(n_measured)
+                + total_shape_lh(tfirst - time_geo)
+                + jnp.log(1 - cumul) * n_measured
+            )
 
-        """
-        # Penalty for unphysical times
-        unphysical_all_src = jnp.all(~physical, axis=0)  # has shape (nevents,)
-        shape_lh = jnp.where(
-            unphysical_all_src[np.newaxis, :], jnp.full_like(shape_lh, -1e10), shape_lh
-        )
-        """
-
-        source_weight = n_photons / jnp.sum(n_photons)
-        # Mask the scale factor. This will remove unwanted source-time pairs from the logsumexp
-        scale_factor = source_weight[:, np.newaxis] * mask + 1e-10
-
-        # weighted_lh = scale_factor + shape_lh
-
-        shape_lh = jax.scipy.special.logsumexp(shape_lh, b=scale_factor, axis=0)
-
-        noise_lh = -jnp.log(noise_window_len) * n_ph_meas
-
-        total_shape_lh = jnp.logaddexp(
-            noise_lh + jnp.log(noise_photons / n_ph_pred_per_mod_total),
-            shape_lh + jnp.log(n_ph_pred_per_mod / n_ph_pred_per_mod_total),
-        )
-
-        # total_lh = shape_lh
-
-        if split_shape_counts:
-            return total_shape_lh, counts_lh, n_ph_pred_per_mod_total
-
-        shape_lh_sum = cond(
-            jnp.any(finite_times), lambda tlh: tlh.sum(), lambda _: 0.0, total_shape_lh
-        )
-
-        return shape_lh_sum + counts_lh
+            return llh + counts_lh
 
     return eval_per_module_likelihood
 

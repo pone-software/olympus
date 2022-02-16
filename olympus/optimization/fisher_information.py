@@ -26,19 +26,28 @@ def pad_event(event):
     return ev_np
 
 
+def pad_array_log_bucket(array, base):
+    if ak.count(array) == 0:
+        return np.array([], dtype=np.float)
+
+    log_cnt = np.log(ak.count(array)) / np.log(base)
+    pad_len = int(np.power(base, np.ceil(log_cnt)))
+    if ak.count(array) > pad_len:
+        raise RuntimeError()
+
+    padded = ak.pad_none(array, target=pad_len, clip=True, axis=0)
+    ev_np = np.asarray((ak.fill_none(padded, np.inf)))
+    return ev_np
+
+
 def calc_fisher_info_cascades(
-    det,
-    event_data,
-    key,
-    converter,
-    ph_prop,
-    lh_func,
-    c_medium,
-    n_ev=20,
+    det, event_data, key, converter, ph_prop, lh_func, c_medium, n_ev=20, pad_base=4
 ):
     def eval_for_mod(
         x, y, z, theta, phi, t, log10e, times, mod_coords, noise_rate, key
     ):
+
+        print("Retracing")
 
         pos = jnp.asarray([x, y, z])
         dir = sph_to_cart_jnp(theta, phi)
@@ -49,6 +58,7 @@ def calc_fisher_info_cascades(
 
         return lh_func(
             times,
+            jnp.sum(jnp.isfinite(times)),
             mod_coords,
             sources[0],
             sources[1],
@@ -73,11 +83,12 @@ def calc_fisher_info_cascades(
 
         event, _ = simulate_noise(det, event)
 
-        padded = pad_event(event)
-
+        # padded = pad_event(event)
+        # padded = [np.asarray(event[j]) for j in range(len(event))]
         jacsum = 0
-        for j in range(padded.shape[0]):
+        for j in range(len(event)):
 
+            padded = pad_array_log_bucket(event[j], pad_base)
             res = jnp.stack(
                 eval_jacobian(
                     event_data["pos"][0],
@@ -87,7 +98,7 @@ def calc_fisher_info_cascades(
                     event_data["phi"],
                     event_data["time"],
                     np.log10(event_data["energy"]),
-                    padded[j],
+                    padded,
                     det.module_coords[j],
                     det.module_noise_rates[j],
                     k2,
