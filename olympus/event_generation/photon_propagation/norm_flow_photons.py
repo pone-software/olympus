@@ -14,10 +14,27 @@ from hyperion.models.photon_arrival_time_nflow.net import (
 )
 from jax import random
 
-from .utils import sources_to_model_input, sources_to_model_input_per_module
+from .utils import sources_to_model_input, sources_to_model_input_per_module, bucket_fn
 
 
-def make_generate_norm_flow_photons(shape_model_path, counts_model_path, c_medium):
+def make_generate_norm_flow_photons(
+    shape_model_path, counts_model_path, c_medium, padding_base=4
+):
+    """
+    Sample photon arrival times using a normalizing flow and a counts model.
+
+    Paramaters:
+        shape_model_path: str
+        counts_model_path: str
+        c_medium: float
+            Speed of light in medium (ns). Used to calculate
+            the direct propagation time between source and module.
+            Make sure it matches the value used in generating the PDF.
+        padding_base: int
+            Logarithmic base used to calculate bucket size when compiling the
+            sampling function. bucket_size = padding_base**N
+
+    """
     shape_config, shape_params = pickle.load(open(shape_model_path, "rb"))
     counts_config, counts_params = pickle.load(open(counts_model_path, "rb"))
 
@@ -28,10 +45,6 @@ def make_generate_norm_flow_photons(shape_model_path, counts_model_path, c_mediu
         shape_config["flow_num_layers"],
     )
 
-    @jax.jit
-    def apply_fn(params, x):
-        return shape_conditioner.apply(params, x)
-
     dist_builder = traf_dist_builder(
         shape_config["flow_num_layers"],
         (shape_config["flow_rmin"], shape_config["flow_rmax"]),
@@ -40,26 +53,20 @@ def make_generate_norm_flow_photons(shape_model_path, counts_model_path, c_mediu
 
     counts_net = make_counts_net_fn(counts_config)
 
-    """
-    def sample_model(traf_params, key):
-        return sample_shape_model(dist_builder, traf_params, traf_params.shape[0], key)
-    """
-
+    @bucket_fn(bucket_size=8)
     @jax.jit
-    def sample_model_inner(traf_params, key):
-        return sample_shape_model(dist_builder, traf_params, traf_params.shape[0], key)
+    def apply_fn(x):
+        return shape_conditioner.apply(shape_params, x)
 
+    @bucket_fn(bucket_size=8)
+    @jax.jit
+    def counts_net_apply_fn(x):
+        return counts_net.apply(counts_params, x)
+
+    @bucket_fn(bucket_size=padding_base)
+    @jax.jit
     def sample_model(traf_params, key):
-
-        base = 4
-        log_cnt = np.log(traf_params.shape[0]) / np.log(base)
-        pad_len = int(np.power(base, np.ceil(log_cnt)))
-
-        padded = jnp.pad(traf_params, ((0, pad_len - traf_params.shape[0]), (0, 0)))
-
-        result = sample_model_inner(padded, key)
-
-        return result[: traf_params.shape[0]]
+        return sample_shape_model(dist_builder, traf_params, traf_params.shape[0], key)
 
     def generate_norm_flow_photons(
         module_coords,
@@ -109,9 +116,7 @@ def make_generate_norm_flow_photons(shape_model_path, counts_model_path, c_mediu
         mod_eff_factor_masked = mod_eff_factor[distance_mask]
 
         # Eval count net to obtain survival fraction
-        ph_frac = jnp.power(
-            10, counts_net.apply(counts_params, inp_params_masked)
-        ).squeeze()
+        ph_frac = jnp.power(10, counts_net_apply_fn(inp_params_masked)).squeeze()
 
         # Sample number of detected photons
         n_photons_masked = ph_frac * source_photons_masked * mod_eff_factor_masked
@@ -126,7 +131,7 @@ def make_generate_norm_flow_photons(shape_model_path, counts_model_path, c_mediu
             return ak.Array(times)
 
         # Obtain flow parameters and repeat them for each detected photon
-        traf_params = apply_fn(shape_params, inp_params_masked)
+        traf_params = apply_fn(inp_params_masked)
         traf_params_rep = jnp.repeat(traf_params, n_photons_masked, axis=0)
         # Also repeat the geometric time for each detected photon
         time_geo_rep = jnp.repeat(time_geo_masked, n_photons_masked, axis=0).squeeze()
