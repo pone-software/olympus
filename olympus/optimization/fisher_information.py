@@ -12,6 +12,7 @@ from ..event_generation.event_generation import (
 )
 from ..event_generation.utils import proposal_setup, sph_to_cart_jnp
 from ..utils import rotate_to_new_direc_v
+from functools import partial
 
 
 def pad_event(event):
@@ -28,7 +29,7 @@ def pad_event(event):
 
 def pad_array_log_bucket(array, base):
     if ak.count(array) == 0:
-        return np.array([], dtype=np.float)
+        return np.array([np.inf], dtype=np.float)
 
     log_cnt = np.log(ak.count(array)) / np.log(base)
     pad_len = int(np.power(base, np.ceil(log_cnt)))
@@ -41,10 +42,32 @@ def pad_array_log_bucket(array, base):
 
 
 def calc_fisher_info_cascades(
-    det, event_data, key, converter, ph_prop, lh_func, c_medium, n_ev=20, pad_base=4
+    det,
+    event_data,
+    key,
+    converter,
+    ph_prop,
+    lh_func,
+    lh_func_counts,
+    c_medium,
+    n_ev=20,
+    pad_base=4,
+    mode="full",
 ):
     def eval_for_mod(
-        x, y, z, theta, phi, t, log10e, times, mod_coords, noise_rate, key
+        x,
+        y,
+        z,
+        theta,
+        phi,
+        t,
+        log10e,
+        times,
+        counts,
+        mod_coords,
+        mod_eff,
+        noise_rate,
+        key,
     ):
 
         pos = jnp.asarray([x, y, z])
@@ -54,10 +77,12 @@ def calc_fisher_info_cascades(
             pos, t, dir, 10 ** log10e, particle_id=event_data["particle_id"], key=key
         )
 
-        return lh_func(
+        # Call signature is the same for tfirst and full
+        shape_lh, counts_lh = lh_func(
             times,
-            jnp.sum(jnp.isfinite(times)),
+            counts,
             mod_coords,
+            mod_eff,
             sources[0],
             sources[1],
             sources[2],
@@ -66,7 +91,52 @@ def calc_fisher_info_cascades(
             noise_rate,
         )
 
+        finite_times = jnp.isfinite(times)
+        return ((shape_lh * finite_times).sum() + counts_lh).sum()
+
+    def eval_for_mod_counts(
+        x,
+        y,
+        z,
+        theta,
+        phi,
+        t,
+        log10e,
+        times,
+        counts,
+        mod_coords,
+        mod_eff,
+        noise_rate,
+        key,
+    ):
+
+        pos = jnp.asarray([x, y, z])
+        dir = sph_to_cart_jnp(theta, phi)
+
+        sources = converter(
+            pos, t, dir, 10 ** log10e, particle_id=event_data["particle_id"], key=key
+        )
+
+        # Call signature is the same for tfirst and full
+        counts_lh = lh_func_counts(
+            times,
+            counts,
+            mod_coords,
+            mod_eff,
+            sources[0],
+            sources[1],
+            sources[2],
+            sources[3],
+            c_medium,
+            noise_rate,
+        )
+
+        return counts_lh
+
     eval_jacobian = jax.jit(jax.jacobian(eval_for_mod, [0, 1, 2, 3, 4, 5, 6]))
+    eval_jacobian_counts = jax.jit(
+        jax.jacobian(eval_for_mod_counts, [0, 1, 2, 3, 4, 5, 6])
+    )
 
     matrices = []
     for _ in range(n_ev):
@@ -81,13 +151,23 @@ def calc_fisher_info_cascades(
 
         event, _ = simulate_noise(det, event)
 
-        # padded = pad_event(event)
-        # padded = [np.asarray(event[j]) for j in range(len(event))]
         jacsum = 0
+        counts = np.asarray(ak.count(event, axis=1))
         for j in range(len(event)):
-            padded = pad_array_log_bucket(event[j], pad_base)
+            if len(event[j]) == 0:
+                eval_func = eval_jacobian_counts
+            else:
+                eval_func = eval_jacobian
+
+            if mode == "full":
+                padded = pad_array_log_bucket(event[j], pad_base)
+            elif mode == "tfirst":
+                if len(event[j]) == 0:
+                    padded = jnp.asarray([])
+                else:
+                    padded = float(ak.min(event[j]))
             res = jnp.stack(
-                eval_jacobian(
+                eval_func(
                     event_data["pos"][0],
                     event_data["pos"][1],
                     event_data["pos"][2],
@@ -96,7 +176,9 @@ def calc_fisher_info_cascades(
                     event_data["time"],
                     np.log10(event_data["energy"]),
                     padded,
+                    counts[j],
                     det.module_coords[j],
+                    det.module_efficiencies[j],
                     det.module_noise_rates[j],
                     k2,
                 )

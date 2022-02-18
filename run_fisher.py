@@ -62,6 +62,11 @@ gen_ph = make_generate_norm_flow_photons(
 lh_per_mod = make_nflow_photon_likelihood_per_module(
     args.shape_model, args.counts_model, mode=args.mode
 )
+
+lh_per_mod_counts = make_nflow_photon_likelihood_per_module(
+    args.shape_model, args.counts_model, mode="counts"
+)
+
 pmts_per_module = args.pmts
 pmt_cath_area_r = 75e-3 / 2  # m
 module_radius = 0.21  # m
@@ -96,7 +101,7 @@ event_data["dir"] = sph_to_cart_jnp(event_data["theta"], event_data["phi"])
 converter = functools.partial(
     make_realistic_cascade_source, resolution=0.3, moliere_rand=True
 )
-ph_prop = functools.partial(gen_ph)
+ph_prop = gen_ph
 
 fisher = calc_fisher_info_cascades(
     det,
@@ -105,9 +110,11 @@ fisher = calc_fisher_info_cascades(
     converter,
     gen_ph,
     lh_per_mod,
+    lh_per_mod_counts,
     c_medium=c_medium_f(700) / 1e9,
     n_ev=50,
     pad_base=args.pad_base,
+    mode=args.mode,
 )
 
 pickle.dump(

@@ -177,7 +177,6 @@ def make_nflow_photon_likelihood_per_module(
         shape_config["flow_num_layers"],
     )
 
-    @jax.jit
     def apply_fn(params, x):
         return shape_conditioner.apply(params, x)
 
@@ -188,11 +187,9 @@ def make_nflow_photon_likelihood_per_module(
 
     counts_net = make_counts_net_fn(counts_config)
 
-    @jax.jit
     def counts_net_apply_fn(params, x):
         return counts_net.apply(params, x)
 
-    @jax.jit
     def eval_l_p(traf_params, samples):
         return eval_log_prob(dist_builder, traf_params, samples)
 
@@ -229,6 +226,7 @@ def make_nflow_photon_likelihood_per_module(
         time,
         n_measured,
         module_coords,
+        module_efficiencies,
         source_pos,
         source_dir,
         source_time,
@@ -261,14 +259,14 @@ def make_nflow_photon_likelihood_per_module(
             ph_frac * source_photons.squeeze(), (source_pos.shape[0],)
         )
 
-        n_ph_pred_per_mod = jnp.sum(n_photons)
+        n_ph_pred_per_mod = jnp.sum(n_photons) * module_efficiencies
         n_ph_pred_per_mod_total = n_ph_pred_per_mod + noise_photons
 
         counts_lh = jnp.sum(
             -n_ph_pred_per_mod_total + n_measured * jnp.log(n_ph_pred_per_mod_total)
         )
 
-        if mode == "counts" or time.shape[0] == 0:
+        if mode == "counts":
             return counts_lh
 
         def total_shape_lh(t_res):
@@ -281,14 +279,17 @@ def make_nflow_photon_likelihood_per_module(
                 noise_lh + jnp.log(noise_photons / n_ph_pred_per_mod_total),
                 shape_lh + jnp.log(n_ph_pred_per_mod / n_ph_pred_per_mod_total),
             )
+
+            total_shape_lh = total_shape_lh
+
             return total_shape_lh
 
         if mode == "full":
-            return total_shape_lh(t_res).sum() + counts_lh
+            return total_shape_lh(t_res), counts_lh
 
         elif mode == "tfirst":
-            tfirst = jnp.min(time)
-            tvanilla = jnp.linspace(-1000, tfirst, 5000)
+            tfirst = time
+            tvanilla = jnp.linspace(-1000, tfirst, 4000)
             # tsamples = tvanilla / 5000 * (tfirst + 1000) - 1000
             tsamples = tvanilla - time_geo
 
@@ -300,7 +301,7 @@ def make_nflow_photon_likelihood_per_module(
                 + jnp.log(1 - cumul) * n_measured
             )
 
-            return llh.sum() + counts_lh
+            return llh.sum(), counts_lh
 
     return eval_per_module_likelihood
 
