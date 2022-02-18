@@ -5,9 +5,11 @@ from typing import Optional, Union, Iterable
 import pandas as pd
 
 from ..photon_source import PhotonSource, PhotonSourceType
+from functools import partial
+from time import time
 
 
-def bucket_fn(bucket_size):
+def bucket_fn(bucket_size, use_bayesian_blocks=True):
     """
     Decorator for builing a bucket function.
 
@@ -15,41 +17,73 @@ def bucket_fn(bucket_size):
     to sime discrete bucket size.
     """
 
-    past_sizes = []
+    class _decorator:
+        def __init__(self, fn, use_bayesian_blocks):
+            self._fn = fn
 
-    def decorator(fn):
-        def inner(x, *args):
+            self._past_sizes = []
+            self._past_times = []
+            self._buckets = None
+            self._use_bblocks = use_bayesian_blocks
+            self._block_calc_at = 50
+
+        def __call__(self, x, *args):
 
             data_size = x.shape[0]
-            past_sizes.append(data_size)
-            # Analyze bucket_size
-            if len(past_sizes) == 50:
-                ps = np.asarray(past_sizes)
-                ps = ps[ps > 0]
-                logsize = np.log2(ps)
-                buckets = bayesian_blocks(logsize)
-            else:
-                buckets = None
+            if data_size == 0:
+                return self._fn(x, *args)
 
-            if buckets is None:
+            if self._use_bblocks:
+                self._past_sizes.append(data_size)
+
+                # Analyze bucket_size
+                if len(self._past_sizes) == self._block_calc_at:
+                    """
+                    print(
+                        f"Analyzing bucket-size. Past time stats {np.median(self._past_times)} / {np.percentile(self._past_times, 90)}"
+                    )
+                    """
+                    ps = np.asarray(self._past_sizes)
+                    ps = ps[ps > 0]
+                    logsize = np.log2(ps)
+                    blocks = bayesian_blocks(logsize)
+                    if len(blocks) > 3:
+                        self._buckets = bayesian_blocks(logsize)
+                        # print(f"New buckets: {self._buckets}")
+                elif len(self._past_sizes) > self._block_calc_at and (
+                    (len(self._past_sizes) % 10) == 0
+                ):
+                    pass
+                    """
+                    print(
+                        f"Past time stats {np.median(self._past_times[-10:])} / {np.percentile(self._past_times[-10:], 90)}"
+                    )
+                    print(
+                        f"Pre-blocks {np.median(self._past_times[:self._block_calc_at])} / {np.percentile(self._past_times[:self._block_calc_at], 90)}"
+                    )
+                    """
+
+            if self._buckets is None:
                 log_cnt = np.log(data_size) / np.log(bucket_size)
                 pad_len = int(np.power(bucket_size, np.ceil(log_cnt)))
             else:
                 lds = np.log2(data_size)
-                if lds > buckets[-1]:
-                    log2_pad_len = buckets[-1] + 1
+                if lds > self._buckets[-1]:
+                    log2_pad_len = self._buckets[-1] + 1
                 else:
-                    log2_pad_len = buckets[np.digitize(lds, buckets)]
+                    log2_pad_len = self._buckets[np.digitize(lds, self._buckets)]
                 pad_len = int(np.ceil(np.power(2, log2_pad_len)))
 
             padded = jnp.pad(
                 x, [(0, pad_len - data_size)] + [(0, 0)] * (len(x.shape) - 1)
             )
-            return fn(padded, *args)[:data_size]
 
-        return inner
+            start = time()
+            retval = self._fn(padded, *args)[:data_size]
+            self._past_times.append(time() - start)
+            return retval
 
-    return decorator
+    return partial(_decorator, use_bayesian_blocks=use_bayesian_blocks)
 
 
 def source_to_model_input_per_module(
