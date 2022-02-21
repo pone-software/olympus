@@ -68,10 +68,13 @@ def bucket_fn(bucket_size, use_bayesian_blocks=True):
                 pad_len = int(np.power(bucket_size, np.ceil(log_cnt)))
             else:
                 lds = np.log2(data_size)
-                if lds > self._buckets[-1]:
-                    log2_pad_len = self._buckets[-1] + 1
+                bucket_ix = np.digitize(lds, self._buckets)
+                if bucket_ix == 0:
+                    log2_pad_len = self._buckets[1]
+                elif bucket_ix == len(self._buckets):
+                    log2_pad_len = np.ceil(np.log(data_size) / np.log(bucket_size))
                 else:
-                    log2_pad_len = self._buckets[np.digitize(lds, self._buckets)]
+                    log2_pad_len = self._buckets[bucket_ix]
                 pad_len = int(np.ceil(np.power(2, log2_pad_len)))
 
             padded = jnp.pad(

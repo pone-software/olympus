@@ -15,6 +15,7 @@ parser.add_argument("--dag-dir", required=True, dest="dag_dir")
 parser.add_argument("--singularity-image", required=True, dest="simage")
 parser.add_argument("--for-slurm", action="store_true", dest="for_slurm")
 parser.add_argument("--repo-path", required=True, dest="repo_path")
+parser.add_argument("--mode", required=True, choices=["tfirst", "full", "counts"], dest="mode")
 
 args = parser.parse_args()
 
@@ -35,10 +36,10 @@ os.chmod(runsh_file, st.st_mode | stat.S_IEXEC)
 
 if not args.for_slurm:
     exec = runsh_file
-    exec_args = f"python {args.repo_path}/olympus/run_fisher.py -o {outfile_path} -s $(spacing) -e $(energy) --seed $(seed) --shape_model {args.shape_model} --counts_model {args.counts_model} --pmts $(pmts) --mode tfirst"
+    exec_args = f"python {args.repo_path}/olympus/run_fisher.py -o {outfile_path} -s $(spacing) -e $(energy) --seed $(seed) --shape_model {args.shape_model} --counts_model {args.counts_model} --pmts $(pmts) --mode {args.mode}"
 else:
     exec = runsh_file
-    exec_args = f"singularity exec --bind /mnt:/mnt --nv {args.simage} python {args.repo_path}/olympus/run_fisher.py -o {outfile_path} -s $(spacing) -e $(energy) --seed $(seed) --shape_model {args.shape_model} --counts_model {args.counts_model} --pmts $(pmts) --mode tfirst"
+    exec_args = f"singularity exec --bind /mnt:/mnt --nv {args.simage} python {args.repo_path}/olympus/run_fisher.py -o {outfile_path} -s $(spacing) -e $(energy) --seed $(seed) --shape_model {args.shape_model} --counts_model {args.counts_model} --pmts $(pmts) --mode {args.mode}"
 
 description = htcondor.Submit(
     executable=exec,  # the program we want to run
@@ -50,6 +51,7 @@ description = htcondor.Submit(
     Requirements="HasSingularity",
     should_transfer_files="YES",
     when_to_transfer_output="ON_EXIT",
+    request_memory="2.5GB"
 )
 description["+SingularityImage"] = classad.quote(args.simage)
 
