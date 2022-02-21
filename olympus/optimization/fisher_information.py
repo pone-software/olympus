@@ -154,7 +154,7 @@ def calc_fisher_info_cascades(
         jacsum = 0
         counts = np.asarray(ak.count(event, axis=1))
         for j in range(len(event)):
-            if len(event[j]) == 0:
+            if (mode == "counts") or (len(event[j]) == 0):
                 eval_func = eval_jacobian_counts
             else:
                 eval_func = eval_jacobian
@@ -166,6 +166,8 @@ def calc_fisher_info_cascades(
                     padded = jnp.asarray([])
                 else:
                     padded = float(ak.min(event[j]))
+            else:
+                padded = jnp.asarray([])
             res = jnp.stack(
                 eval_func(
                     event_data["pos"][0],

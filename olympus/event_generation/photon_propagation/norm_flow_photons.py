@@ -244,9 +244,6 @@ def make_nflow_photon_likelihood_per_module(
         )
 
         inp_pars = inp_pars.reshape((source_pos.shape[0], inp_pars.shape[-1]))
-        time_geo = time_geo.reshape((source_pos.shape[0], time_geo.shape[-1]))
-
-        t_res = time - time_geo
 
         ph_frac = jnp.power(10, counts_net_apply_fn(counts_params, inp_pars)).reshape(
             source_pos.shape[0]
@@ -268,6 +265,9 @@ def make_nflow_photon_likelihood_per_module(
 
         if mode == "counts":
             return counts_lh
+
+        time_geo = time_geo.reshape((source_pos.shape[0], time_geo.shape[-1]))
+        t_res = time - time_geo
 
         def total_shape_lh(t_res):
             source_weight = n_photons / jnp.sum(n_photons)
