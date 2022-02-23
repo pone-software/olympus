@@ -3,6 +3,7 @@ import logging
 
 import jax.numpy as jnp
 import numpy as np
+import awkward as ak
 from scipy.integrate import quad
 
 from .constants import Constants
@@ -156,3 +157,10 @@ def deposited_energy(det, record):
         if is_in_cylinder(det.outer_cylinder[0], det.outer_cylinder[1], source.pos):
             dep_e += source.amp
     return dep_e
+
+
+def get_event_times_by_rate(rate: float, start_time: int, end_time: int, rng=np.random.RandomState(1337)) -> ak.Array:
+    time_range = [start_time, end_time]
+    dT = np.diff(time_range)
+    number_events = rng.poisson(rate * dT)
+    return rng.uniform(*time_range, size=number_events)

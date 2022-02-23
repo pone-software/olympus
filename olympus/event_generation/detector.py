@@ -5,6 +5,8 @@ import awkward as ak
 import numpy as np
 import scipy.stats
 
+from olympus.olympus.event_generation.utils import get_event_times_by_rate
+
 
 class Module(object):
     """
@@ -321,7 +323,7 @@ def sample_cylinder_volume(height, radius, n, rng=np.random.RandomState(1337)):
     return samples
 
 
-def sample_direction(n_samples, rng=np.random.RandomState(1337)):
+def sample_direction(n_samples, rng=np.random.RandomState(1337)) -> np.ndarray:
     """Sample uniform directions."""
     cos_theta = rng.uniform(-1, 1, size=n_samples)
     theta = np.arccos(cos_theta)
@@ -347,8 +349,7 @@ def generate_noise(det, time_range, rng=np.random.RandomState(1337)):
     all_times_det = []
     dT = np.diff(time_range)
     for idom in range(len(det.modules)):
-        noise_amp = rng.poisson(det.modules[idom].noise_rate * dT)
-        times_det = rng.uniform(*time_range, size=noise_amp)
+        times_det = get_event_times_by_rate(det.modules[idom].noise_rate, time_range[0], time_range[1], rng=rng)
         all_times_det.append(times_det)
 
     return ak.sort(ak.Array(all_times_det))
