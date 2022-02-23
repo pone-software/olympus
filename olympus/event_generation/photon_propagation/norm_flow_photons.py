@@ -162,10 +162,217 @@ def make_generate_norm_flow_photons(
     return generate_norm_flow_photons
 
 
+class NormFlowPhotonLHPerModule(object):
+    def __init__(self, shape_model_path, counts_model_path, noise_window_len, c_medium):
+        shape_config, self._shape_params = pickle.load(open(shape_model_path, "rb"))
+        counts_config, self._counts_params = pickle.load(open(counts_model_path, "rb"))
+
+        self._shape_conditioner_fn = make_shape_conditioner_fn(
+            shape_config["mlp_hidden_size"],
+            shape_config["mlp_num_layers"],
+            shape_config["flow_num_bins"],
+            shape_config["flow_num_layers"],
+        )
+
+        self._dist_builder = traf_dist_builder(
+            shape_config["flow_num_layers"],
+            (shape_config["flow_rmin"], shape_config["flow_rmax"]),
+        )
+
+        self._counts_net_fn = make_counts_net_fn(counts_config)
+        self._c_medium = c_medium
+        self._noise_window_len = noise_window_len
+
+    def get_shape_net_params(self, x):
+        return self._shape_conditioner_fn.apply(self._shape_params, x)
+
+    def eval_shape_log_prob(self, net_inp_params, x):
+        traf_params = self.get_shape_net_params(net_inp_params)
+        traf_params = traf_params.reshape(
+            (net_inp_params.shape[0], 1, traf_params.shape[-1])
+        )
+        return eval_log_prob(self._dist_builder, traf_params, x)
+
+    def eval_counts_net(self, x):
+        return self._counts_net_fn.apply(self._counts_params, x)
+
+    def expected_photons(self, module_efficiency, net_inp_params, source_photons):
+
+        ph_frac = jnp.power(10, self.eval_counts_net(net_inp_params)).reshape(
+            source_photons.shape[0]
+        )
+
+        n_photons = jnp.reshape(
+            ph_frac * source_photons.squeeze(), (source_photons.shape[0],)
+        )
+        n_ph_pred_per_source = n_photons * module_efficiency
+
+        return n_ph_pred_per_source
+
+    def expected_noise_photons(self, module_noise_rate):
+        return module_noise_rate * self._noise_window_len
+
+    def expected_photons_for_sources(
+        self,
+        module_coords,
+        module_efficiency,
+        source_pos,
+        source_dir,
+        source_time,
+        source_photons,
+    ):
+
+        inp_pars, _ = sources_to_model_input_per_module(
+            module_coords,
+            source_pos,
+            source_dir,
+            source_time,
+            self._c_medium,
+        )
+        return self.expected_photons(module_efficiency, inp_pars, source_photons)
+
+    def per_module_shape_llh(
+        self, t_res, net_inp_pars, src_photons_pred, noise_photons_pred
+    ):
+
+        n_photons_pred = src_photons_pred + noise_photons_pred
+
+        source_weight = n_photons_pred / jnp.sum(n_photons_pred)
+
+        distance_mask = (net_inp_pars[..., 0] < np.log10(300))[:, np.newaxis]
+
+        finite_times = jnp.isfinite(t_res)
+        physical = t_res > -4
+
+        mask = distance_mask & finite_times & physical
+
+        # Sanitize likelihood evaluation to avoid nans.
+        sanitized_times = jnp.where(mask, t_res, jnp.zeros_like(t_res))
+        shape_llh = self.eval_shape_log_prob(net_inp_pars, sanitized_times)
+
+        # Mask the scale factor. This will remove unwanted source-time pairs from the logsumexp
+        scale_factor = source_weight[:, np.newaxis] * mask  # + 1e-15
+
+        # Sanitize scale factor. Rows will all zeros lead to nan in logsumexp.
+        all_zeros = jnp.all(~mask, axis=0)
+        scale_factor += jnp.full(all_zeros.shape[0], 1e-15) * all_zeros
+
+        # logsumexp is log( sum_i b_i * (exp (a_i)))
+        shape_llh = jax.scipy.special.logsumexp(shape_llh, b=scale_factor, axis=0)
+
+        return shape_llh
+
+    def per_module_shape_lh_with_noise(
+        self,
+        t_res,
+        net_inp_params,
+        src_photons_pred,
+        noise_photons_pred,
+    ):
+
+        shape_lh = self.per_module_shape_llh(
+            t_res, net_inp_params, src_photons_pred, noise_photons_pred
+        )
+        noise_lh = -jnp.log(self._noise_window_len)
+
+        src_photons_sum = src_photons_pred.sum()
+
+        n_photons_pred = src_photons_sum + noise_photons_pred
+
+        total_shape_lh = jnp.logaddexp(
+            noise_lh + jnp.log(noise_photons_pred / n_photons_pred),
+            shape_lh + jnp.log(src_photons_sum / n_photons_pred),
+        )
+
+        return total_shape_lh
+
+    def per_module_shape_lh_with_noise_for_sources(
+        self,
+        times,
+        module_coords,
+        source_pos,
+        source_dir,
+        source_time,
+        src_photons_pred,
+        noise_photons_pred,
+    ):
+        net_inp_params, t_geo = sources_to_model_input_per_module(
+            module_coords,
+            source_pos,
+            source_dir,
+            source_time,
+            self._c_medium,
+        )
+
+        t_res = times - t_geo
+
+        return self.per_module_shape_lh_with_noise(
+            t_res, net_inp_params, src_photons_pred, noise_photons_pred
+        )
+
+    @staticmethod
+    def poisson_llh(predicted, measured):
+        return -predicted + measured * jnp.log(predicted)
+
+    def per_module_poisson_llh(
+        self,
+        module_noise_rate,
+        module_efficiency,
+        n_measured,
+        source_photons,
+        net_inp_pars,
+    ):
+        n_ph_pred_per_mod = self.expected_photons(
+            module_efficiency, net_inp_pars, source_photons
+        ).sum()
+
+        n_p_pred_noise = self.expected_noise_photons(module_noise_rate)
+
+        return self.poisson_llh(n_ph_pred_per_mod + n_p_pred_noise, n_measured)
+
+    def per_module_full_llh(
+        self,
+        times,
+        counts,
+        source_pos,
+        source_dir,
+        source_time,
+        source_photons,
+        module_coords,
+        module_noise_rate,
+        module_efficiency,
+    ):
+        net_inp_pars, t_geo = sources_to_model_input_per_module(
+            module_coords,
+            source_pos,
+            source_dir,
+            source_time,
+            self._c_medium,
+        )
+
+        t_res = times - t_geo
+
+        src_photons_pred = self.expected_photons(
+            module_efficiency, net_inp_pars, source_photons
+        )
+        noise_photons_pred = self.expected_noise_photons(module_noise_rate)
+
+        n_photons_total = src_photons_pred.sum() + noise_photons_pred
+
+        shape_llh = self.per_module_shape_lh_with_noise(
+            t_res, net_inp_pars, src_photons_pred, noise_photons_pred
+        )
+        poisson_llh = self.poisson_llh(n_photons_total, counts)
+
+        return shape_llh, poisson_llh
+
+    def per_module_full_llh_sum(self, *args):
+        shape, poisson = self.per_module_full_llh(*args)
+        return shape.sum() + poisson
+
+
 def make_nflow_photon_likelihood_per_module(
-    shape_model_path,
-    counts_model_path,
-    mode="full",
+    shape_model_path, counts_model_path, mode="full", noise_window_len=5000
 ):
     shape_config, shape_params = pickle.load(open(shape_model_path, "rb"))
     counts_config, counts_params = pickle.load(open(counts_model_path, "rb"))
@@ -219,9 +426,6 @@ def make_nflow_photon_likelihood_per_module(
 
         return shape_lh
 
-    # per_module_shape_lh_v = jax.vmap(per_module_shape_lh, in_axes=[0, None, None])
-    # per_module_shape_lh_v_j = jax.jit(jax.vmap(per_module_shape_lh, in_axes = [0, None, None]))
-
     def eval_per_module_likelihood(
         time,
         n_measured,
@@ -249,14 +453,14 @@ def make_nflow_photon_likelihood_per_module(
             source_pos.shape[0]
         )
 
-        noise_window_len = 5000
         noise_photons = noise_rate * noise_window_len
 
-        n_photons = jnp.reshape(
-            ph_frac * source_photons.squeeze(), (source_pos.shape[0],)
+        n_photons = (
+            jnp.reshape(ph_frac * source_photons.squeeze(), (source_pos.shape[0],))
+            * module_efficiencies
         )
 
-        n_ph_pred_per_mod = jnp.sum(n_photons) * module_efficiencies
+        n_ph_pred_per_mod = jnp.sum(n_photons)
         n_ph_pred_per_mod_total = n_ph_pred_per_mod + noise_photons
 
         counts_lh = jnp.sum(
@@ -285,7 +489,7 @@ def make_nflow_photon_likelihood_per_module(
             return total_shape_lh
 
         if mode == "full":
-            return total_shape_lh(t_res), counts_lh
+            return total_shape_lh(t_res), counts_lh, n_ph_pred_per_mod_total
 
         elif mode == "tfirst":
             tfirst = time
@@ -301,7 +505,7 @@ def make_nflow_photon_likelihood_per_module(
                 + jnp.log(1 - cumul) * n_measured
             )
 
-            return llh.sum(), counts_lh
+            return llh.sum(), counts_lh, n_ph_pred_per_mod_total
 
     return eval_per_module_likelihood
 
