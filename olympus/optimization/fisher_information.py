@@ -47,8 +47,7 @@ def calc_fisher_info_cascades(
     key,
     converter,
     ph_prop,
-    lh_func,
-    lh_func_counts,
+    llhobj,
     c_medium,
     n_ev=20,
     pad_base=4,
@@ -78,23 +77,23 @@ def calc_fisher_info_cascades(
         )
 
         # Call signature is the same for tfirst and full
-        shape_lh, counts_lh = lh_func(
+        shape_lh, counts_lh = llhobj.per_module_full_llh(
             times,
             counts,
-            mod_coords,
-            mod_eff,
             sources[0],
             sources[1],
             sources[2],
             sources[3],
-            c_medium,
+            mod_coords,
             noise_rate,
+            mod_eff,
         )
 
         finite_times = jnp.isfinite(times)
-        return ((shape_lh * finite_times).sum() + counts_lh).sum()
+        summed = (shape_lh * finite_times).sum() + counts_lh
+        return summed
 
-    def eval_for_mod_counts(
+    def eval_for_mod_tfirst(
         x,
         y,
         z,
@@ -117,23 +116,62 @@ def calc_fisher_info_cascades(
             pos, t, dir, 10 ** log10e, particle_id=event_data["particle_id"], key=key
         )
 
-        # Call signature is the same for tfirst and full
-        counts_lh = lh_func_counts(
+        shape_lh, counts_lh = llhobj.per_module_tfirst_llh(
             times,
             counts,
+            sources[0],
+            sources[1],
+            sources[2],
+            sources[3],
             mod_coords,
+            noise_rate,
+            mod_eff,
+        )
+
+        finite_times = jnp.isfinite(times)
+        summed = (shape_lh.squeeze() * finite_times).sum() + counts_lh
+        return summed
+
+    def eval_for_mod_counts(
+        x,
+        y,
+        z,
+        theta,
+        phi,
+        t,
+        log10e,
+        _,
+        counts,
+        mod_coords,
+        mod_eff,
+        noise_rate,
+        key,
+    ):
+
+        pos = jnp.asarray([x, y, z])
+        dir = sph_to_cart_jnp(theta, phi)
+
+        sources = converter(
+            pos, t, dir, 10 ** log10e, particle_id=event_data["particle_id"], key=key
+        )
+
+        # Call signature is the same for tfirst and full
+        counts_lh = llhobj.per_module_poisson_llh_for_sources(
+            counts,
+            mod_coords,
+            noise_rate,
             mod_eff,
             sources[0],
             sources[1],
             sources[2],
             sources[3],
-            c_medium,
-            noise_rate,
         )
-
         return counts_lh
 
     eval_jacobian = jax.jit(jax.jacobian(eval_for_mod, [0, 1, 2, 3, 4, 5, 6]))
+    eval_jacobian_tfirst = jax.jit(
+        jax.jacobian(eval_for_mod_tfirst, [0, 1, 2, 3, 4, 5, 6])
+    )
     eval_jacobian_counts = jax.jit(
         jax.jacobian(eval_for_mod_counts, [0, 1, 2, 3, 4, 5, 6])
     )
@@ -156,6 +194,8 @@ def calc_fisher_info_cascades(
         for j in range(len(event)):
             if (mode == "counts") or (len(event[j]) == 0):
                 eval_func = eval_jacobian_counts
+            elif mode == "tfirst":
+                eval_func = eval_jacobian_tfirst
             else:
                 eval_func = eval_jacobian
 

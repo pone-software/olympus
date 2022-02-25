@@ -330,6 +330,34 @@ class NormFlowPhotonLHPerModule(object):
 
         return self.poisson_llh(n_ph_pred_per_mod + n_p_pred_noise, n_measured)
 
+    def per_module_poisson_llh_for_sources(
+        self,
+        n_measured,
+        module_coords,
+        module_noise_rate,
+        module_efficiency,
+        source_pos,
+        source_dir,
+        source_time,
+        source_photons,
+    ):
+
+        net_inp_pars, _ = sources_to_model_input_per_module(
+            module_coords,
+            source_pos,
+            source_dir,
+            source_time,
+            self._c_medium,
+        )
+
+        return self.per_module_poisson_llh(
+            module_noise_rate,
+            module_efficiency,
+            n_measured,
+            source_photons,
+            net_inp_pars,
+        )
+
     def per_module_full_llh(
         self,
         times,
@@ -369,6 +397,63 @@ class NormFlowPhotonLHPerModule(object):
     def per_module_full_llh_sum(self, *args):
         shape, poisson = self.per_module_full_llh(*args)
         return shape.sum() + poisson
+
+    def per_module_tfirst_llh(
+        self,
+        time,
+        counts,
+        source_pos,
+        source_dir,
+        source_time,
+        source_photons,
+        module_coords,
+        module_noise_rate,
+        module_efficiency,
+    ):
+
+        net_inp_pars, t_geo = sources_to_model_input_per_module(
+            module_coords,
+            source_pos,
+            source_dir,
+            source_time,
+            self._c_medium,
+        )
+
+        tfirst = time
+
+        window_start = jnp.min(t_geo) - self._noise_window_len / 2
+
+        tvanilla = jnp.linspace(window_start, tfirst, 1000).squeeze()
+        # tsamples = tvanilla / 5000 * (tfirst + 1000) - 1000
+        tsamples = tvanilla - t_geo
+
+        src_photons_pred = self.expected_photons(
+            module_efficiency, net_inp_pars, source_photons
+        )
+        noise_photons_pred = self.expected_noise_photons(module_noise_rate)
+
+        n_photons_total = src_photons_pred.sum() + noise_photons_pred
+
+        shape_llh = self.per_module_shape_lh_with_noise(
+            tsamples, net_inp_pars, src_photons_pred, noise_photons_pred
+        )
+
+        poisson_llh = self.poisson_llh(n_photons_total, counts)
+
+        cumul = jnp.trapz(jnp.exp(shape_llh), x=tvanilla)
+
+        llh = (
+            jnp.log(counts)
+            + self.per_module_shape_lh_with_noise(
+                (jnp.atleast_1d(tfirst) - t_geo),
+                net_inp_pars,
+                src_photons_pred,
+                noise_photons_pred,
+            )
+            + jnp.log(1 - cumul) * (counts - 1)
+        )
+
+        return llh, poisson_llh
 
 
 def make_nflow_photon_likelihood_per_module(
