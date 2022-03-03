@@ -44,15 +44,18 @@ def pad_array_log_bucket(array, base):
 def calc_fisher_info_cascades(
     det,
     event_data,
-    key,
+    seed,
     converter,
     ph_prop,
     llhobj,
-    c_medium,
+    noise_window_len,
     n_ev=20,
     pad_base=4,
     mode="full",
 ):
+    key = random.PRNGKey(seed)
+    rng = np.random.RandomState(seed)
+
     def eval_for_mod(
         x,
         y,
@@ -187,7 +190,7 @@ def calc_fisher_info_cascades(
             converter_func=converter,
         )
 
-        event, _ = simulate_noise(det, event)
+        event, _ = simulate_noise(det, event, noise_window_len, rng)
 
         jacsum = 0
         counts = np.asarray(ak.count(event, axis=1))

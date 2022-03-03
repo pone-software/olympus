@@ -41,7 +41,7 @@ parser.add_argument("--counts_model", type=str, required=True)
 parser.add_argument("--seed", type=int, required=True)
 parser.add_argument("--mode", choices=["full", "counts", "tfirst"], required=True)
 parser.add_argument("--pad_base", default=8, type=int, required=False)
-parser.add_argument("--nev", default=50, type=int, required=False)
+parser.add_argument("--nev", default=100, type=int, required=False)
 
 args = parser.parse_args()
 
@@ -54,16 +54,18 @@ def c_medium_f(wl):
     return Constants.BaseConstants.c_vac / cascadia_ref_index_func(wl)
 
 
-dark_noise_rate = 16 * 1e4 * 1e-9  # 1/ns
+dark_noise_rate = args.pmts * 1e4 * 1e-9  # 1/ns
 
 gen_ph = make_generate_norm_flow_photons(
     args.shape_model, args.counts_model, c_medium=c_medium_f(700) / 1e9
 )
 
+noise_window_len = 2000  # ns
+
 llhobj = NormFlowPhotonLHPerModule(
     args.shape_model,
     args.counts_model,
-    noise_window_len=800,
+    noise_window_len=noise_window_len,
     c_medium=c_medium_f(700) * 1e-9,
 )
 
@@ -73,7 +75,7 @@ module_radius = 0.21  # m
 
 # Calculate the relative area covered by PMTs
 efficiency = (
-    pmts_per_module * (pmt_cath_area_r) ** 2 * np.pi / (4 * np.pi * module_radius ** 2)
+    pmts_per_module * (pmt_cath_area_r) ** 2 * np.pi / (4 * np.pi * module_radius**2)
 )
 
 rng = np.random.RandomState(args.seed)
@@ -106,11 +108,11 @@ ph_prop = gen_ph
 fisher = calc_fisher_info_cascades(
     det,
     event_data,
-    random.PRNGKey(args.seed),
+    args.seed,
     converter,
     gen_ph,
     llhobj,
-    c_medium=c_medium_f(700) / 1e9,
+    noise_window_len=noise_window_len,
     n_ev=args.nev,
     pad_base=args.pad_base,
     mode=args.mode,

@@ -23,19 +23,16 @@ from .utils import track_isects_cyl
 logger = logging.getLogger(__name__)
 
 
-def simulate_noise(det, event):
+def simulate_noise(det, event, noise_window_len, rng):
 
-    if ak.count(event) == 0:
-        time_range = [-1000, 4000]
-        noise = generate_noise(det, time_range)
+    time_range = [0, noise_window_len]
+    noise = generate_noise(det, time_range)
+
+    if ak.count(event) == 0:        
         event = ak.sort(noise, axis=1)
 
-    else:
-        time_range = [
-            ak.min(ak.flatten(event)) - 1000,
-            ak.max(ak.flatten(event)) + 4000,
-        ]
-        noise = generate_noise(det, time_range)
+    else:       
+        noise = generate_noise(det, time_range, rng)
         event = ak.sort(ak.concatenate([event, noise], axis=1))
 
     return event, noise

@@ -15,11 +15,15 @@ parser.add_argument("--dag-dir", required=True, dest="dag_dir")
 parser.add_argument("--singularity-image", required=True, dest="simage")
 parser.add_argument("--for-slurm", action="store_true", dest="for_slurm")
 parser.add_argument("--repo-path", required=True, dest="repo_path")
-parser.add_argument("--mode", required=True, choices=["tfirst", "full", "counts"], dest="mode")
+parser.add_argument(
+    "--mode", required=True, choices=["tfirst", "full", "counts"], dest="mode"
+)
 
 args = parser.parse_args()
 
-outfile_path = os.path.join(args.outfolder, "fisher_$(spacing)_$(energy)_$(pmts)_$(seed)_tfirst.npz")
+outfile_path = os.path.join(
+    args.outfolder, "fisher_$(spacing)_$(energy)_$(pmts)_$(seed)_tfirst.npz"
+)
 
 
 runsh_cont = f"""ulimit -c 0
@@ -51,13 +55,13 @@ description = htcondor.Submit(
     Requirements="HasSingularity",
     should_transfer_files="YES",
     when_to_transfer_output="ON_EXIT",
-    request_memory="2.5GB"
+    request_memory="2.5GB",
 )
 description["+SingularityImage"] = classad.quote(args.simage)
 
-spacings = np.linspace(50, 200, 7)
-energies = np.logspace(3, 5.5, 7)
-seeds = np.arange(100)
+spacings = np.linspace(50, 200, 6)
+energies = np.logspace(3, 5.5, 6)
+seeds = np.arange(200)
 pmts = [16, 20, 24]
 
 dagvars = []

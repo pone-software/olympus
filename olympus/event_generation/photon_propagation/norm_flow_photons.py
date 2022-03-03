@@ -183,22 +183,22 @@ class NormFlowPhotonLHPerModule(object):
         self._c_medium = c_medium
         self._noise_window_len = noise_window_len
 
-    def get_shape_net_params(self, x):
+    def _get_shape_net_params(self, x):
         return self._shape_conditioner_fn.apply(self._shape_params, x)
 
-    def eval_shape_log_prob(self, net_inp_params, x):
-        traf_params = self.get_shape_net_params(net_inp_params)
+    def _eval_shape_log_prob(self, net_inp_params, x):
+        traf_params = self._get_shape_net_params(net_inp_params)
         traf_params = traf_params.reshape(
             (net_inp_params.shape[0], 1, traf_params.shape[-1])
         )
         return eval_log_prob(self._dist_builder, traf_params, x)
 
-    def eval_counts_net(self, x):
+    def _eval_counts_net(self, x):
         return self._counts_net_fn.apply(self._counts_params, x)
 
     def expected_photons(self, module_efficiency, net_inp_params, source_photons):
 
-        ph_frac = jnp.power(10, self.eval_counts_net(net_inp_params)).reshape(
+        ph_frac = jnp.power(10, self._eval_counts_net(net_inp_params)).reshape(
             source_photons.shape[0]
         )
 
@@ -248,7 +248,7 @@ class NormFlowPhotonLHPerModule(object):
 
         # Sanitize likelihood evaluation to avoid nans.
         sanitized_times = jnp.where(mask, t_res, jnp.zeros_like(t_res))
-        shape_llh = self.eval_shape_log_prob(net_inp_pars, sanitized_times)
+        shape_llh = self._eval_shape_log_prob(net_inp_pars, sanitized_times)
 
         # Mask the scale factor. This will remove unwanted source-time pairs from the logsumexp
         scale_factor = source_weight[:, np.newaxis] * mask  # + 1e-15
@@ -421,8 +421,7 @@ class NormFlowPhotonLHPerModule(object):
 
         tfirst = time
 
-        window_start = jnp.min(t_geo) - self._noise_window_len / 2
-
+        window_start = 0
         tvanilla = jnp.linspace(window_start, tfirst, 1000).squeeze()
         # tsamples = tvanilla / 5000 * (tfirst + 1000) - 1000
         tsamples = tvanilla - t_geo
