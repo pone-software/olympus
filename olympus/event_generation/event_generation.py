@@ -3,7 +3,6 @@ import functools
 import logging
 
 import awkward as ak
-import jax.numpy as jnp
 import numpy as np
 from jax import random
 from tqdm.auto import trange
@@ -17,7 +16,6 @@ from .detector import (
 from .lightyield import make_pointlike_cascade_source, make_realistic_cascade_source
 from .mc_record import MCRecord
 from .photon_propagation.utils import source_array_to_sources
-from .photon_source import PhotonSource
 from .utils import track_isects_cyl
 
 logger = logging.getLogger(__name__)
@@ -28,10 +26,10 @@ def simulate_noise(det, event, noise_window_len, rng):
     time_range = [0, noise_window_len]
     noise = generate_noise(det, time_range)
 
-    if ak.count(event) == 0:        
+    if ak.count(event) == 0:
         event = ak.sort(noise, axis=1)
 
-    else:       
+    else:
         noise = generate_noise(det, time_range, rng)
         event = ak.sort(ak.concatenate([event, noise], axis=1))
 
@@ -102,7 +100,7 @@ def generate_cascades(
     particle_id,
     pprop_func,
     converter_func,
-    noise_function=simulate_noise,
+    noise_function,
 ):
     """Generate a sample of cascades, randomly sampling the positions in a cylinder of given radius and length."""
     rng = np.random.RandomState(seed)
@@ -340,6 +338,7 @@ def generate_realistic_tracks(
     log_emax,
     pprop_func,
     proposal_prop=None,
+    noise_function=None,
 ):
     """Generate realistic muon tracks."""
     rng = np.random.RandomState(seed)
@@ -402,7 +401,8 @@ def generate_realistic_tracks(
         )
 
         event, record = result
-        event, _ = simulate_noise(det, event)
+        if noise_function:
+            event, _ = noise_function(det, event)
 
         events.append(event)
         records.append(record)
@@ -420,6 +420,7 @@ def generate_realistic_starting_tracks(
     log_emax,
     pprop_func,
     proposal_prop=None,
+    noise_function=None,
 ):
     """Generate realistic starting tracks (cascade + track)."""
     rng = np.random.RandomState(seed)
@@ -483,7 +484,8 @@ def generate_realistic_starting_tracks(
             event = ak.sort(ak.concatenate([track, cascade], axis=1))
         record = track_record + cascade_record
 
-        event, _ = simulate_noise(det, event)
+        if noise_function is not None:
+            event, _ = simulate_noise(det, event)
         events.append(event)
         records.append(record)
 
