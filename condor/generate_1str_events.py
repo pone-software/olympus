@@ -20,7 +20,7 @@ args = parser.parse_args()
 outfile_path = os.path.join(args.outfolder, "events_$(type)_$(seed).pickle")
 
 runsh_cont = f"""ulimit -c 0
-export PYTHONPATH={args.repo_path}/olympus:{args.repo_path}/hyperion
+export PYTHONPATH=/opt/PROPOSAL/build/src/pyPROPOSAL:{args.repo_path}/olympus:{args.repo_path}/hyperion
 "$@"
 """
 runsh_file = os.path.join(args.repo_path, "run.sh")
