@@ -33,10 +33,10 @@ os.chmod(runsh_file, st.st_mode | stat.S_IEXEC)
 
 if not args.for_slurm:
     exec = runsh_file
-    exec_args = f"python {args.repo_path}/olympus/generate_events.py -n 100 -o {outfile_path} --seed $(seed) --shape_model {args.shape_model} --counts_model {args.counts_model} --config {args.config} --type $(type)"
+    exec_args = f"python {args.repo_path}/olympus/generate_events.py -n 100 -o {outfile_path} --seed $(seed) --shape-model {args.shape_model} --counts-model {args.counts_model} --config {args.config} --type $(type)"
 else:
     exec = runsh_file
-    exec_args = f"singularity exec --bind /mnt:/mnt --nv {args.simage} python {args.repo_path}/olympus/generate_events.py -n 100 -o {outfile_path} --seed $(seed) --shape_model {args.shape_model} --counts_model {args.counts_model} --config {args.config} --type $(type)"
+    exec_args = f"singularity exec --bind /mnt:/mnt --nv {args.simage} python {args.repo_path}/olympus/generate_events.py -n 100 -o {outfile_path} --seed $(seed) --shape-model {args.shape_model} --counts-model {args.counts_model} --config {args.config} --type $(type)"
 
 description = htcondor.Submit(
     executable=exec,  # the program we want to run
