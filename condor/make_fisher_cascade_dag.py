@@ -19,10 +19,11 @@ parser.add_argument(
     "--mode", required=True, choices=["tfirst", "full", "counts"], dest="mode"
 )
 
+
 args = parser.parse_args()
 
 outfile_path = os.path.join(
-    args.outfolder, "fisher_$(spacing)_$(energy)_$(pmts)_$(seed)_tfirst.npz"
+    args.outfolder, "fisher_$(spacing)_$(energy)_$(pmts)_$(seed)_$(mode)_$(det).npz"
 )
 
 
@@ -40,10 +41,10 @@ os.chmod(runsh_file, st.st_mode | stat.S_IEXEC)
 
 if not args.for_slurm:
     exec = runsh_file
-    exec_args = f"python {args.repo_path}/olympus/run_fisher.py -o {outfile_path} -s $(spacing) -e $(energy) --seed $(seed) --shape_model {args.shape_model} --counts_model {args.counts_model} --pmts $(pmts) --mode {args.mode}"
+    exec_args = f"python {args.repo_path}/olympus/run_fisher.py -o {outfile_path} -s $(spacing) -e $(energy) --seed $(seed) --shape_model {args.shape_model} --counts_model {args.counts_model} --pmts $(pmts) --mode {args.mode} --det $(det)"
 else:
     exec = runsh_file
-    exec_args = f"singularity exec --bind /mnt:/mnt --nv {args.simage} python {args.repo_path}/olympus/run_fisher.py -o {outfile_path} -s $(spacing) -e $(energy) --seed $(seed) --shape_model {args.shape_model} --counts_model {args.counts_model} --pmts $(pmts) --mode {args.mode}"
+    exec_args = f"singularity exec --bind /mnt:/mnt --nv {args.simage} python {args.repo_path}/olympus/run_fisher.py -o {outfile_path} -s $(spacing) -e $(energy) --seed $(seed) --shape_model {args.shape_model} --counts_model {args.counts_model} --pmts $(pmts) --mode {args.mode} --det $(det)"
 
 description = htcondor.Submit(
     executable=exec,  # the program we want to run
@@ -63,10 +64,13 @@ spacings = np.linspace(50, 200, 6)
 energies = np.logspace(3, 5.5, 6)
 seeds = np.arange(200)
 pmts = [16, 20, 24]
+dets = ["triangle", "cluster"]
 
 dagvars = []
-for spacing, energy, seed, pmt in product(spacings, energies, seeds, pmts):
-    dagvars.append({"spacing": spacing, "energy": energy, "seed": seed, "pmts": pmt})
+for spacing, energy, seed, pmt, det in product(spacings, energies, seeds, pmts, dets):
+    dagvars.append(
+        {"spacing": spacing, "energy": energy, "seed": seed, "pmts": pmt, "det": det}
+    )
 
 dag = htcondor.dags.DAG()
 

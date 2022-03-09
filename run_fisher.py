@@ -9,7 +9,12 @@ import functools
 
 import numpy as np
 from jax import random
-from olympus.event_generation.detector import make_rhombus, make_triang
+from olympus.event_generation.detector import (
+    make_triang,
+    make_hex_grid,
+    Detector,
+    make_line,
+)
 from olympus.event_generation.lightyield import (
     make_pointlike_cascade_source,
     make_realistic_cascade_source,
@@ -22,7 +27,6 @@ from olympus.optimization.fisher_information import calc_fisher_info_cascades
 
 from hyperion.constants import Constants
 from hyperion.medium import cascadia_ref_index_func, sca_len_func_antares
-from hyperion.utils import make_cascadia_abs_len_func
 
 from olympus.event_generation.detector import (
     generate_noise,
@@ -42,11 +46,11 @@ parser.add_argument("--seed", type=int, required=True)
 parser.add_argument("--mode", choices=["full", "counts", "tfirst"], required=True)
 parser.add_argument("--pad_base", default=8, type=int, required=False)
 parser.add_argument("--nev", default=100, type=int, required=False)
+parser.add_argument("--det", choices=["triangle", "cluster", "single"], required=True)
 
 args = parser.parse_args()
 
 ref_index_func = cascadia_ref_index_func
-abs_len = make_cascadia_abs_len_func(sca_len_func_antares)
 
 
 def c_medium_f(wl):
@@ -79,7 +83,23 @@ efficiency = (
 )
 
 rng = np.random.RandomState(args.seed)
-det = make_triang(args.spacing, 20, 50, dark_noise_rate, rng, efficiency=efficiency)
+if args.det == "triangle":
+    det = make_triang(args.spacing, 20, 50, dark_noise_rate, rng, efficiency=efficiency)
+elif args.det == "cluster":
+    det = Detector(
+        make_hex_grid(
+            3,
+            args.spacing,
+            20,
+            50,
+            dark_noise_rate,
+            rng,
+            efficiency=efficiency,
+            truncate=1,
+        )
+    )
+else:
+    raise NotImplementedError()
 radius, height = det.outer_cylinder
 
 event_pos = sample_cylinder_volume(height, radius, 1, rng).squeeze()

@@ -11,10 +11,7 @@ import json
 from hyperion.constants import Constants
 from hyperion.medium import medium_collections
 
-from olympus.event_generation.detector import (
-    Detector,
-    make_line,
-)
+from olympus.event_generation.detector import Detector, make_line, make_triang
 from olympus.event_generation.event_generation import (
     generate_cascades,
     generate_realistic_starting_tracks,
@@ -64,7 +61,8 @@ module_radius = 0.21  # m
 efficiency = (
     pmts_per_module * (pmt_cath_area_r) ** 2 * np.pi / (4 * np.pi * module_radius**2)
 )
-det = Detector(make_line(0, 0, 20, 50, rng, dark_noise_rate, 0, efficiency=efficiency))
+# det = Detector(make_line(0, 0, 20, 50, rng, dark_noise_rate, 0, efficiency=efficiency))
+det = make_triang(100, 20, dist_z, dark_noise_rate, rng, efficiency)
 
 gen_ph = make_generate_norm_flow_photons(
     args.shape_model,
