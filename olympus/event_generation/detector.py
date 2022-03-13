@@ -144,7 +144,14 @@ def make_grid(
 
 
 def make_hex_grid(
-    n_side, dist, n_z, dist_z, baseline_noise_rate=1e-6, rng=np.random.RandomState(1337)
+    n_side,
+    dist,
+    n_z,
+    dist_z,
+    baseline_noise_rate=1e-6,
+    rng=np.random.RandomState(1337),
+    efficiency=0.5,
+    truncate=0,
 ):
     """
     Build a hex detector grid.
@@ -167,7 +174,7 @@ def make_hex_grid(
     modules = []
     line_id = 0
 
-    for irow in range(0, n_side):
+    for irow in range(0, n_side - truncate):
         i_this_row = 2 * (n_side - 1) - irow
         x_pos = np.linspace(
             -(i_this_row - 1) / 2 * dist, (i_this_row - 1) / 2 * dist, i_this_row
@@ -175,7 +182,14 @@ def make_hex_grid(
         y_pos = irow * dist * np.sqrt(3) / 2
         for x in x_pos:
             modules += make_line(
-                x, y_pos, n_z, dist_z, rng, baseline_noise_rate, line_id
+                x,
+                y_pos,
+                n_z,
+                dist_z,
+                rng,
+                baseline_noise_rate,
+                line_id,
+                efficiency=efficiency,
             )
             line_id += 1
 
@@ -187,7 +201,14 @@ def make_hex_grid(
 
             for x in x_pos:
                 modules += make_line(
-                    x, y_pos, n_z, dist_z, rng, baseline_noise_rate, line_id
+                    x,
+                    y_pos,
+                    n_z,
+                    dist_z,
+                    rng,
+                    baseline_noise_rate,
+                    line_id,
+                    efficiency=efficiency,
                 )
                 line_id += 1
 
@@ -203,7 +224,7 @@ def make_triang(
     efficiency=0.5,
 ):
 
-    height = np.sqrt(side_len ** 2 - (side_len / 2) ** 2)
+    height = np.sqrt(side_len**2 - (side_len / 2) ** 2)
 
     modules = make_line(
         -side_len / 2,
@@ -283,7 +304,7 @@ def make_rhombus(
 def sample_cylinder_surface(height, radius, n, rng=np.random.RandomState(1337)):
     """Sample points on a cylinder surface."""
     side_area = 2 * np.pi * radius * height
-    top_area = 2 * np.pi * radius ** 2
+    top_area = 2 * np.pi * radius**2
 
     ratio = top_area / (top_area + side_area)
 
