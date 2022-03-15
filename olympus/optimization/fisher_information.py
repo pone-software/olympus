@@ -9,9 +9,12 @@ from ..event_generation.event_generation import (
     generate_muon_energy_losses,
     generate_realistic_track,
     simulate_noise,
+    make_double_casc_source,
+    make_single_casc_source,
 )
 from ..event_generation.utils import proposal_setup, sph_to_cart_jnp
 from ..utils import rotate_to_new_direc_v
+from ..event_generation.constants import Constants
 from functools import partial
 
 
@@ -76,7 +79,7 @@ def calc_fisher_info_cascades(
         dir = sph_to_cart_jnp(theta, phi)
 
         sources = converter(
-            pos, t, dir, 10 ** log10e, particle_id=event_data["particle_id"], key=key
+            pos, t, dir, 10**log10e, particle_id=event_data["particle_id"], key=key
         )
 
         # Call signature is the same for tfirst and full
@@ -116,7 +119,7 @@ def calc_fisher_info_cascades(
         dir = sph_to_cart_jnp(theta, phi)
 
         sources = converter(
-            pos, t, dir, 10 ** log10e, particle_id=event_data["particle_id"], key=key
+            pos, t, dir, 10**log10e, particle_id=event_data["particle_id"], key=key
         )
 
         shape_lh, counts_lh = llhobj.per_module_tfirst_llh(
@@ -155,7 +158,7 @@ def calc_fisher_info_cascades(
         dir = sph_to_cart_jnp(theta, phi)
 
         sources = converter(
-            pos, t, dir, 10 ** log10e, particle_id=event_data["particle_id"], key=key
+            pos, t, dir, 10**log10e, particle_id=event_data["particle_id"], key=key
         )
 
         # Call signature is the same for tfirst and full
@@ -229,6 +232,230 @@ def calc_fisher_info_cascades(
                 )
             )
             jacsum += res
+        matrices.append(np.asarray(jacsum[:, np.newaxis] * jacsum[np.newaxis, :]))
+
+    fisher = np.average(np.stack(matrices), axis=0)
+    return fisher
+
+
+def calc_fisher_info_double_cascades(
+    det,
+    event_data,
+    seed,
+    converter,
+    ph_prop,
+    llhobj,
+    noise_window_len,
+    n_ev=20,
+    pad_base=4,
+    mode="full",
+):
+    def make_sources(x, y, z, theta, phi, t, log10e1, log10e2, log10separation, key):
+
+        ev_data = {
+            "pos": jnp.asarray([x, y, z]),
+            "theta": theta,
+            "phi": phi,
+            "energy": 10**log10e1,
+            "energy2": 10**log10e2,
+            "separation": 10**log10separation,
+            "time": t,
+            "particle_id": 11,
+        }
+        ev_data["dir"] = sph_to_cart_jnp(theta, phi)
+
+        sources = make_double_casc_source(ev_data, converter, key)
+
+        return sources
+
+    def eval_for_mod(
+        x,
+        y,
+        z,
+        theta,
+        phi,
+        t,
+        log10e1,
+        log10e2,
+        logseparation,
+        times,
+        counts,
+        mod_coords,
+        mod_eff,
+        noise_rate,
+        key,
+    ):
+
+        sources = make_sources(
+            x, y, z, theta, phi, t, log10e1, log10e2, logseparation, key
+        )
+
+        # Call signature is the same for tfirst and full
+        shape_lh, counts_lh = llhobj.per_module_full_llh(
+            times,
+            counts,
+            sources[0],
+            sources[1],
+            sources[2],
+            sources[3],
+            mod_coords,
+            noise_rate,
+            mod_eff,
+        )
+
+        finite_times = jnp.isfinite(times)
+        summed = (shape_lh * finite_times).sum() + counts_lh
+        return summed
+
+    def eval_for_mod_tfirst(
+        x,
+        y,
+        z,
+        theta,
+        phi,
+        t,
+        log10e1,
+        log10e2,
+        logseparation,
+        times,
+        counts,
+        mod_coords,
+        mod_eff,
+        noise_rate,
+        key,
+    ):
+
+        sources = make_sources(
+            x, y, z, theta, phi, t, log10e1, log10e2, logseparation, key
+        )
+
+        shape_lh, counts_lh = llhobj.per_module_tfirst_llh(
+            times,
+            counts,
+            sources[0],
+            sources[1],
+            sources[2],
+            sources[3],
+            mod_coords,
+            noise_rate,
+            mod_eff,
+        )
+
+        finite_times = jnp.isfinite(times)
+        summed = (shape_lh.squeeze() * finite_times).sum() + counts_lh
+        return summed
+
+    def eval_for_mod_counts(
+        x,
+        y,
+        z,
+        theta,
+        phi,
+        t,
+        log10e1,
+        log10e2,
+        logseparation,
+        _,
+        counts,
+        mod_coords,
+        mod_eff,
+        noise_rate,
+        key,
+    ):
+
+        sources = make_sources(
+            x, y, z, theta, phi, t, log10e1, log10e2, logseparation, key
+        )
+
+        # Call signature is the same for tfirst and full
+        counts_lh = llhobj.per_module_poisson_llh_for_sources(
+            counts,
+            mod_coords,
+            noise_rate,
+            mod_eff,
+            sources[0],
+            sources[1],
+            sources[2],
+            sources[3],
+        )
+        return counts_lh
+
+    key = random.PRNGKey(seed)
+    rng = np.random.RandomState(seed)
+
+    eval_jacobian = jax.jit(jax.jacobian(eval_for_mod, list(range(9))))
+    eval_jacobian_tfirst = jax.jit(jax.jacobian(eval_for_mod_tfirst, list(range(9))))
+    eval_jacobian_counts = jax.jit(jax.jacobian(eval_for_mod_counts, list(range(9))))
+
+    matrices = []
+    for _ in range(n_ev):
+        key, k1, k2 = random.split(key, 3)
+
+        sources = make_sources(
+            event_data["pos"][0],
+            event_data["pos"][1],
+            event_data["pos"][2],
+            event_data["theta"],
+            event_data["phi"],
+            event_data["time"],
+            np.log10(event_data["energy"]),
+            np.log10(event_data["energy2"]),
+            np.log10(event_data["separation"]),
+            k1,
+        )
+
+        event = ph_prop(
+            det.module_coords,
+            det.module_efficiencies,
+            sources[0],
+            sources[1],
+            sources[2],
+            sources[3],
+            seed=k2,
+        )
+        event, _ = simulate_noise(det, event, noise_window_len, rng)
+
+        jacsum = 0
+        counts = np.asarray(ak.count(event, axis=1))
+        for j in range(len(event)):
+            if (mode == "counts") or (len(event[j]) == 0):
+                eval_func = eval_jacobian_counts
+            elif mode == "tfirst":
+                eval_func = eval_jacobian_tfirst
+            else:
+                eval_func = eval_jacobian
+
+            if mode == "full":
+                padded = pad_array_log_bucket(event[j], pad_base)
+            elif mode == "tfirst":
+                if len(event[j]) == 0:
+                    padded = jnp.asarray([])
+                else:
+                    padded = float(ak.min(event[j]))
+            else:
+                padded = jnp.asarray([])
+            res = jnp.stack(
+                eval_func(
+                    event_data["pos"][0],
+                    event_data["pos"][1],
+                    event_data["pos"][2],
+                    event_data["theta"],
+                    event_data["phi"],
+                    event_data["time"],
+                    np.log10(event_data["energy"]),
+                    np.log10(event_data["energy2"]),
+                    np.log10(event_data["separation"]),
+                    padded,
+                    counts[j],
+                    det.module_coords[j],
+                    det.module_efficiencies[j],
+                    det.module_noise_rates[j],
+                    k2,
+                )
+            )
+            jacsum += res
+        if jnp.any(jacsum == 0):
+            raise RuntimeError("Got zero grad")
         matrices.append(np.asarray(jacsum[:, np.newaxis] * jacsum[np.newaxis, :]))
 
     fisher = np.average(np.stack(matrices), axis=0)

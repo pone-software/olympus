@@ -39,12 +39,19 @@ with open(runsh_file, "w") as hdl:
 st = os.stat(runsh_file)
 os.chmod(runsh_file, st.st_mode | stat.S_IEXEC)
 
+
+arg_list = (
+    f"-s $(spacing) --seed $(seed) --shape_model {args.shape_model} "
+    f"--counts_model {args.counts_model} --pmts $(pmts) --mode {args.mode} --det $(det) "
+    f"--nsamples 75 --nev 1 -o {outfile_path} double_casc -e $(energy)"
+)
+
 if not args.for_slurm:
     exec = runsh_file
-    exec_args = f"python {args.repo_path}/olympus/run_fisher.py -o {outfile_path} -s $(spacing) -e $(energy) --seed $(seed) --shape_model {args.shape_model} --counts_model {args.counts_model} --pmts $(pmts) --mode {args.mode} --det $(det)"
+    exec_args = f"python {args.repo_path}/olympus/run_fisher.py {arg_list}"
 else:
     exec = runsh_file
-    exec_args = f"singularity exec --bind /mnt:/mnt --nv {args.simage} python {args.repo_path}/olympus/run_fisher.py -o {outfile_path} -s $(spacing) -e $(energy) --seed $(seed) --shape_model {args.shape_model} --counts_model {args.counts_model} --pmts $(pmts) --mode {args.mode} --det $(det)"
+    exec_args = f"singularity exec --bind /mnt:/mnt --nv {args.simage} python {args.repo_path}/olympus/run_fisher.py {arg_list}"
 
 description = htcondor.Submit(
     executable=exec,  # the program we want to run
@@ -63,7 +70,7 @@ description["+SingularityImage"] = classad.quote(args.simage)
 spacings = np.linspace(50, 200, 6)
 energies = np.logspace(3, 5.5, 6)
 seeds = np.arange(200)
-pmts = [16, 20, 24]
+pmts = [16]  # , 20, 24]
 dets = ["triangle", "cluster"]
 
 dagvars = []
