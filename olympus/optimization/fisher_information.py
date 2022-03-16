@@ -250,7 +250,7 @@ def calc_fisher_info_double_cascades(
     pad_base=4,
     mode="full",
 ):
-    def make_sources(x, y, z, theta, phi, t, log10e1, log10e2, log10separation, key):
+    def make_sources(x, y, z, theta, phi, t, log10e1, log10e2, x2, y2, z2, key):
 
         ev_data = {
             "pos": jnp.asarray([x, y, z]),
@@ -258,7 +258,7 @@ def calc_fisher_info_double_cascades(
             "phi": phi,
             "energy": 10**log10e1,
             "energy2": 10**log10e2,
-            "separation": 10**log10separation,
+            "pos2": jnp.asarray([x2, y2, z2]),
             "time": t,
             "particle_id": 11,
         }
@@ -277,7 +277,9 @@ def calc_fisher_info_double_cascades(
         t,
         log10e1,
         log10e2,
-        logseparation,
+        x2,
+        y2,
+        z2,
         times,
         counts,
         mod_coords,
@@ -287,7 +289,7 @@ def calc_fisher_info_double_cascades(
     ):
 
         sources = make_sources(
-            x, y, z, theta, phi, t, log10e1, log10e2, logseparation, key
+            x, y, z, theta, phi, t, log10e1, log10e2, x2, y2, z2, key
         )
 
         # Call signature is the same for tfirst and full
@@ -316,7 +318,9 @@ def calc_fisher_info_double_cascades(
         t,
         log10e1,
         log10e2,
-        logseparation,
+        x2,
+        y2,
+        z2,
         times,
         counts,
         mod_coords,
@@ -326,7 +330,7 @@ def calc_fisher_info_double_cascades(
     ):
 
         sources = make_sources(
-            x, y, z, theta, phi, t, log10e1, log10e2, logseparation, key
+            x, y, z, theta, phi, t, log10e1, log10e2, x2, y2, z2, key
         )
 
         shape_lh, counts_lh = llhobj.per_module_tfirst_llh(
@@ -354,7 +358,9 @@ def calc_fisher_info_double_cascades(
         t,
         log10e1,
         log10e2,
-        logseparation,
+        x2,
+        y2,
+        z2,
         _,
         counts,
         mod_coords,
@@ -364,7 +370,7 @@ def calc_fisher_info_double_cascades(
     ):
 
         sources = make_sources(
-            x, y, z, theta, phi, t, log10e1, log10e2, logseparation, key
+            x, y, z, theta, phi, t, log10e1, log10e2, x2, y2, z2, key
         )
 
         # Call signature is the same for tfirst and full
@@ -383,13 +389,15 @@ def calc_fisher_info_double_cascades(
     key = random.PRNGKey(seed)
     rng = np.random.RandomState(seed)
 
-    eval_jacobian = jax.jit(jax.jacobian(eval_for_mod, list(range(9))))
-    eval_jacobian_tfirst = jax.jit(jax.jacobian(eval_for_mod_tfirst, list(range(9))))
-    eval_jacobian_counts = jax.jit(jax.jacobian(eval_for_mod_counts, list(range(9))))
+    eval_jacobian = jax.jit(jax.jacobian(eval_for_mod, list(range(11))))
+    eval_jacobian_tfirst = jax.jit(jax.jacobian(eval_for_mod_tfirst, list(range(11))))
+    eval_jacobian_counts = jax.jit(jax.jacobian(eval_for_mod_counts, list(range(11))))
 
     matrices = []
     for _ in range(n_ev):
         key, k1, k2 = random.split(key, 3)
+
+        pos2 = event_data["pos"] + event_data["separation"] * event_data["dir"]
 
         sources = make_sources(
             event_data["pos"][0],
@@ -400,7 +408,9 @@ def calc_fisher_info_double_cascades(
             event_data["time"],
             np.log10(event_data["energy"]),
             np.log10(event_data["energy2"]),
-            np.log10(event_data["separation"]),
+            pos2[0],
+            pos2[1],
+            pos2[2],
             k1,
         )
 
@@ -444,7 +454,9 @@ def calc_fisher_info_double_cascades(
                     event_data["time"],
                     np.log10(event_data["energy"]),
                     np.log10(event_data["energy2"]),
-                    np.log10(event_data["separation"]),
+                    pos2[0],
+                    pos2[1],
+                    pos2[2],
                     padded,
                     counts[j],
                     det.module_coords[j],

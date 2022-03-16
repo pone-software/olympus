@@ -62,8 +62,8 @@ def make_double_casc_source(event_data, converter_func, key):
         key=k1,
     )
 
-    pos2 = event_data["pos"] + event_data["separation"] * event_data["dir"]
-    t2 = event_data["separation"] / Constants.c_vac
+    pos2 = event_data["pos2"]
+    t2 = jnp.linalg.norm(event_data["pos"] - pos2) / Constants.c_vac
 
     source_pos2, source_dir2, source_time2, source_nphotons2 = converter_func(
         pos2,
