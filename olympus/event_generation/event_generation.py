@@ -13,7 +13,7 @@ import awkward as ak
 import numpy as np
 from jax import random
 from tqdm.auto import trange
-from .constants import Constants, Defaults
+from .constants import Constants, defaults
 from .detector import (
     Detector,
     generate_noise,
@@ -29,7 +29,7 @@ from .utils import get_event_times_by_rate, track_isects_cyl
 
 logger = logging.getLogger(__name__)
 
-_default_rng = Defaults.rng
+_default_rng = defaults['rng']
 
 
 def simulate_noise(det, event, noise_window_len, rng):
@@ -55,7 +55,6 @@ def generate_cascade(
     converter_func,
     rng=_default_rng
 ):
-return EventFactory.get_generator(asdasdasd)
     """
     Generate a single cascade with given amplitude and position and return time of detected photons.
 
@@ -491,7 +490,7 @@ def generate_realistic_tracks(
     log_emax,
     pprop_func,
     proposal_prop=None,
-    times=None
+    times=None,
     noise_function=None,
 ):
     """Generate realistic muon tracks."""
@@ -651,145 +650,3 @@ def generate_realistic_starting_tracks(
         records.append(record)
 
     return events, records
-
-class EventFactory():
-    def get_generator(type):
-        if type == 'cascade':
-            return EventGenerator(VolumeInjector, PowerLawSpectrum, Propagator)
-        return EventGenerato
-
-class SurfaceInjector
-
-class VolumeInjector
-
-class TrackGenerator(EventGenerator)
-    def __init__():
-        self.injector = VolumeInjector
-        self.propagator = TrackPropagator
-
-@dataclass
-class EventData:
-    direction = np.ndarray
-    energy = np.ndarray
-    time = int
-    length = float
-    start_position = np.ndarray
-    type = string
-    particle_id = Optional[Any]
-
-class EventGenerator(ABC):
-    def __init__(
-        self, 
-        det: Detector, 
-        log_emin: float, 
-        log_emax: float,
-        seed: Optional[int] = 0,
-        rate: Optional[float] = None,
-        proposal_prop: Optional[callable] = None,
-        pprop_func: Optional[callable] = None,
-    ) -> None:
-        self.det = det
-        self.log_emin = log_emin
-        self.log_emax = log_emax
-        self.seed = seed
-        self.rng = np.random.RandomState(seed=seed)
-        self.rate = rate
-        self.proposal_prop=proposal_prop,
-        self.pprop_func=pprop_func,
-
-    @abstractmethod
-    def _generate_single(event_data: dict):
-        pass
-
-    def generate(
-        self,
-        nsamples: Optional[int] = None, 
-        start_time: Optional[int] = 0, 
-        end_time: Optional[int] = None, 
-        rate: Optional[float] = None):
-        
-        """Generate realistic muon tracks."""
-        key, subkey = random.split(random.PRNGKey(self.seed))
-
-        events = []
-        records = []
-
-        if nsamples is None and (rate is None or end_time is None):
-            raise ValueError('Either number of samples or time parameters must be set')
-
-        time_based = nsamples is None
-
-        if time_based:
-            if rate is None:
-                rate = self.rate
-            iterator_range = _generate_times_from_rate(rate=rate, start_time=start_time, end_time=end_time, seed=self.seed)
-        else:
-            iterator_range = trange(nsamples)
-        
-        cylinder_height= self.det.outer_cylinder[1] + 100
-        cylinder_radius= self.det.outer_cylinder[0] + 50
-
-        track_length = 3000
-
-        events = []
-        records = []
-
-        for i in iterator_range:
-            pos = sample_cylinder_volume(cylinder_height=cylinder_height, cylinder_radius=cylinder_radius, n=1, rng=self.rng)
-            energy = _get_event_energy(log_emin=self.log_emin, log_emax=self.log_emax, rng=rng)
-            direc = _get_event_direction(rng=self.rng)
-
-            event_data = {
-                "pos": pos,
-                "dir": direc,
-                "energy": energy,
-                "length": track_length,
-            }
-
-            if time_based:
-                event_data["time"] = i
-            else:
-                event_data["time"] = start_time
-
-            event, record = self._generate_single(
-                event_data,
-                key=subkey,
-            )
-
-            events.append(event)
-            records.append(record)
-
-        return events, records
-
-    def generate_per_timeframe(self, start_time: int, end_time: int, 
-        rate: Optional[float] = None):
-        return self._generate(start_time=start_time, end_time=end_time, rate=rate)
-
-    def generate_nsamples(self, nsamples: int, start_time: Optional[int] = 0):
-        return self._generate(nsamples=nsamples, start_time=start_time)
-
-
-class EventTimelineGenerator():
-    def __init__(self, det: Detector) -> None:
-        self.det = det
-        self.generators = []
-
-    def add_generator(self, generator: EventGenerator):
-        self.generators.append(generator)
-
-    def generate(self, start_time: Optional[int] = 0, end_time: Optional[int] = None, nsamples: Optional[int] = None):
-        events = []
-        records = []
-
-        for generator in self.generators:
-            gen_events, gen_records = generator.generate(start_time=start_time, end_time=end_time, nsamples=nsamples)
-            events += gen_events
-            records += gen_records
-        return events, records
-
-
-    def generate_per_timeframe(self, start_time: int, end_time: int):
-        return self.generate(start_time=start_time, end_time=end_time)
-
-    def generate_nsamples(self, nsamples: int):
-        return self.generate(nsamples=None)

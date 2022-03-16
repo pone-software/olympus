@@ -5,7 +5,7 @@ import awkward as ak
 import numpy as np
 import scipy.stats
 
-from olympus.olympus.event_generation.utils import get_event_times_by_rate
+from .utils import get_event_times_by_rate
 
 
 class Module(object):

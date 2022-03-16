@@ -19,5 +19,8 @@ class Constants(object):
     # In the relevent wavelength interval, a single charged particle emmits 250 photons / cm
     photons_per_GeV = 5.3 * 250 * 1e2
 
-class Defaults(object):
-    rng: np.random.RandomState(1337)
+
+defaults = {
+    "seed": 1337,
+    "rng": np.random.RandomState(1337)
+}
