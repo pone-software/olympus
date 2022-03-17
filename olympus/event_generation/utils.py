@@ -159,7 +159,7 @@ def deposited_energy(det, record):
     return dep_e
 
 
-def get_event_times_by_rate(rate: float, start_time: int, end_time: int, rng=np.random.RandomState(1337)) -> ak.Array:
+def get_event_times_by_rate(rate: float, start_time: int, end_time: int, rng=np.random.RandomState(1337)) -> np.ndarray:
     time_range = [start_time, end_time]
     dT = np.diff(time_range)
     number_events = rng.poisson(rate * dT)

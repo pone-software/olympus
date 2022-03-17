@@ -5,8 +5,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import plotly.graph_objects as go
 
+from ..event_generation.data import EventCollection
 
-def plot_timeline(det, hit_histograms):
+
+def plot_timeline(event_collection: EventCollection, step_size: int = 50):
+    hit_histograms, records = event_collection.generate_histogram(step_size=step_size)
+    det = event_collection.detector
     plot_target = np.log10(hit_histograms)
 
     traces = [

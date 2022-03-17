@@ -55,9 +55,9 @@ from jax import numpy as jnp
 
 
 
-path_to_config = "../../hyperion/data/pone_config.json"
+path_to_config = "../../hyperion/data/pone_config_optimistic.json"
 config = json.load(open(path_to_config))["photon_propagation"]
-ref_ix_f, sca_a_f, sca_l_f = medium_collections[config["medium"]]
+ref_ix_f, sca_a_f, sca_l_f, something_else = medium_collections[config["medium"]]
 
 
 def c_medium_f(wl):
@@ -127,3 +127,19 @@ events, records = generator_collection.generate(
 histogram = cascades_generator.generate_histogram(events, records)
 
 np.save("histograms" + datetime.now().strftime("%d%m%Y-%H%M%S"), histogram[0])
+
+# 1 redistribute events
+# 2 stupidest network possible
+
+
+# Vortrag
+
+# Martin Dinkel
+
+# 1 P-One What is it, module structure, challenges (bioluminecense) 2-3 min
+# 2 Simulation Framework 3 min
+# 3 Detector Optimization 3 min
+# 4 Trigger Algorithm (FPGA Trigger, Bell Labs)
+# 5 Single detector explanation 3 min
+# 6 Multi Detector Explanation 3 min
+# 7 Future perspective FPGA Trigger, Multi Parameter etc.

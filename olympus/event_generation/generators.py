@@ -19,6 +19,8 @@ from .propagator import (
 )
 from .spectra import AbstractSpectrum, UniformSpectrum
 
+
+from .mc_record import MCRecord
 from .data import EventData
 from .detector import Detector, sample_direction, generate_noise
 from .constants import defaults
@@ -26,26 +28,25 @@ from .utils import get_event_times_by_rate
 
 
 class AbstractGenerator(ABC):
+    def __init__(
+        self,
+        seed: Optional[int] = defaults["seed"],
+        rng: Optional[np.random.RandomState] = defaults["rng"],
+        ) -> None:
+        super().__init__()
+        self.seed = seed
+        self.rng = rng
+
+    def get_key(self):
+        """Generate realistic muon tracks."""
+        key, subkey = random.split(random.PRNGKey(self.seed))
+
+        return key
+
+
     @abstractmethod
     def generate(self, start_time=0, end_time=None, **kwargs) -> Tuple[List, List]:
         pass
-
-    @staticmethod
-    def generate_histogram(events, records, stepsize=50):
-        concatenated_events = ak.sort(ak.concatenate(events, axis=1))
-        max = int(np.ceil(ak.max(concatenated_events)))
-        min = int(np.floor(ak.min(concatenated_events)))
-        bins = int(np.ceil((max - min) / stepsize))
-
-        if bins == 0:
-            bins = 10
-
-        histograms = []
-
-        for module in concatenated_events:
-            histograms.append(np.histogram(module, bins=bins, range=(min, max))[0])
-
-        return np.array(histograms), records
 
 
 class EventGenerator(AbstractGenerator):
@@ -60,11 +61,10 @@ class EventGenerator(AbstractGenerator):
         particle_id: Optional[int] = None,
         **kwargs
     ) -> None:
+        super().__init__(seed, rng)
         self.injector = injector
         self.spectrum = spectrum
         self.propagator = propagator
-        self.seed = seed
-        self.rng = rng
         self.rate = rate
         self.particle_id = particle_id
 
@@ -76,8 +76,7 @@ class EventGenerator(AbstractGenerator):
     ) -> Tuple[List, List]:
 
         """Generate realistic muon tracks."""
-        key, subkey = random.split(random.PRNGKey(self.seed))
-
+        key = self.get_key()
         events = []
         records = []
 
@@ -116,7 +115,7 @@ class EventGenerator(AbstractGenerator):
                 energy=energies[i],
                 direction=directions[i],
                 length=track_length,
-                key=subkey,
+                key=key,
                 time=start_time,
                 particle_id=self.particle_id,
             )
@@ -187,16 +186,23 @@ class RandomNoiseGenerator(AbstractGenerator):
     def __init__(
         self,
         detector: Detector,
+        seed: Optional[int] = defaults["seed"],
         rng: Optional[np.random.RandomState] = defaults["rng"],
         **kwargs
     ) -> None:
-        super().__init__()
+        super().__init__(seed, rng)
         self.detector = detector
         self.rng = rng
+        self.seed = seed
 
     def generate(self, start_time=0, end_time=None) -> Tuple[List, List]:
         time_range = [start_time, end_time]
-        return [generate_noise(self.detector, time_range, self.rng)], []
+        return [generate_noise(self.detector, time_range, self.rng)], [MCRecord('noise', [], EventData(
+            key=self.get_key,
+            direction=np.zeros((3,)),
+            energy=0.0,
+            start_position=np.zeros_like((3,)),
+            ))]
 
 
 class GeneratorFactory:
@@ -244,4 +250,4 @@ class GeneratorCollection:
         return self.generate(start_time=start_time, end_time=end_time)
 
     def generate_nsamples(self, nsamples: int):
-        return self.generate(nsamples=None)
+        return self.generate(nsamples=nsamples)
