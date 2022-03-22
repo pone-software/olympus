@@ -34,7 +34,7 @@ class EventCollection:
     rng: Optional[np.random.RandomState] = defaults["rng"]
     seed: Optional[int] = defaults["seed"]
 
-    def generate_histogram(self, step_size=50, number_of_modules=None) -> Tuple[np.ndarray, List[MCRecord]]:
+    def generate_histogram(self, step_size=50, number_of_modules=None) -> Tuple[np.ndarray, np.ndarray]:
         events_to_account = []
         records_to_account = []
         if number_of_modules is None and self.detector is None:
@@ -61,7 +61,13 @@ class EventCollection:
         for module in concatenated_events:
             histograms.append(np.histogram(module, bins=bins, range=(min, max))[0])
 
-        return np.array(histograms), records_to_account
+        record_histograms = []
+
+        for record in self.records:
+            for source in record.sources:
+                record_histograms.append(np.histogram([source.time], bins=bins, range=(min,max))[0])
+
+        return np.array(histograms), np.array(record_histograms)
 
     def redistribute(
         self,
@@ -110,6 +116,9 @@ class EventCollection:
 
             start_time = info.time
             new_time = times_det[index]
+
+            for source in record.sources:
+                source.time = source.time - start_time + new_time
 
             self.events[index] = self.events[index] - start_time + new_time
             info.time = new_time

@@ -8,8 +8,17 @@ import plotly.graph_objects as go
 from ..event_generation.data import EventCollection
 
 
-def plot_timeline(event_collection: EventCollection, step_size: int = 50):
-    hit_histograms, records = event_collection.generate_histogram(step_size=step_size)
+def plot_timeline(
+    event_collection: EventCollection,
+    step_size: int = 50,
+    draw_records=False,
+    hit_histograms=None,
+    hit_records=None,
+):
+    if hit_histograms is None:
+        hit_histograms, hit_records = event_collection.generate_histogram(
+            step_size=step_size
+        )
     det = event_collection.detector
     plot_target = np.log10(hit_histograms)
 
@@ -40,6 +49,28 @@ def plot_timeline(event_collection: EventCollection, step_size: int = 50):
         ),
     ]
 
+    if draw_records:
+        source_coordinates = []
+        hit_records
+        for record in event_collection.records:
+            for source in record.sources:
+                source_coordinates.append(source.position)
+        source_coordinates = np.array(source_coordinates)
+        traces.append(
+            go.Scatter3d(
+                x=[],
+                y=[],
+                z=[],
+                mode="markers",
+                marker=dict(
+                    size=3,
+                    color="black",  # set color to an array/list of desired values
+                    colorscale="Viridis",  # choose a colorscale
+                    opacity=0.1,
+                ),
+            )
+        )
+
     fig = go.Figure(
         data=traces,
     )
@@ -48,9 +79,10 @@ def plot_timeline(event_collection: EventCollection, step_size: int = 50):
         coloraxis_showscale=True,
         height=1000,
         scene=dict(
-            xaxis=dict(range=[-1500, 1500]),
-            yaxis=dict(range=[-1500, 1500]),
-            zaxis=dict(range=[-1500, 1500]),
+            xaxis=dict(range=[-1500, 1500], autorange=False),
+            yaxis=dict(range=[-1500, 1500], autorange=False),
+            zaxis=dict(range=[-1500, 1500], autorange=False),
+            aspectmode='cube'
         ),
     )
     fig.update_coloraxes(colorbar_title=dict(text="log10 (det. photons)"))
@@ -87,26 +119,59 @@ def plot_timeline(event_collection: EventCollection, step_size: int = 50):
     for k in range(hit_histograms.shape[1]):
         plot_target = hit_histograms[:, k]
         mask = (plot_target > 0) & (plot_target != np.nan)
+        frame_data = [
+            go.Scatter3d(
+                x=det.module_coords[mask, 0],
+                y=det.module_coords[mask, 1],
+                z=det.module_coords[mask, 2],
+                mode="markers",
+                marker=dict(
+                    size=5,
+                    color=plot_target[
+                        mask
+                    ],  # set color to an array/list of desired values
+                    colorscale="Viridis",  # choose a colorscale
+                    opacity=0.8,
+                    # showscale=True,
+                ),
+            ),
+            
+            go.Scatter3d(
+                x=det.module_coords[~mask, 0],
+                y=det.module_coords[~mask, 1],
+                z=det.module_coords[~mask, 2],
+                mode="markers",
+                marker=dict(
+                    size=1,
+                    color="black",  # set color to an array/list of desired values
+                    colorscale="Viridis",  # choose a colorscale
+                    opacity=0.1,
+                ),
+            ),
+        ]
+        if draw_records:
+            record_target = hit_records[:, k]
+            record_mask = (record_target > 0) & (record_target != np.nan)
+
+            frame_data.append(
+                go.Scatter3d(
+                    x=source_coordinates[record_mask, 0],
+                    y=source_coordinates[record_mask, 1],
+                    z=source_coordinates[record_mask, 2],
+                    mode="markers",
+                    marker=dict(
+                        size=3,
+                        color="black",
+                        colorscale="Viridis",
+                        opacity=0.8,
+                        # showscale=True,
+                    ),
+                )
+            )
         frames.append(
             go.Frame(
-                data=[
-                    go.Scatter3d(
-                        x=det.module_coords[mask, 0],
-                        y=det.module_coords[mask, 1],
-                        z=det.module_coords[mask, 2],
-                        mode="markers",
-                        marker=dict(
-                            size=5,
-                            color=plot_target[
-                                mask
-                            ],  # set color to an array/list of desired values
-                            colorscale="Viridis",  # choose a colorscale
-                            opacity=0.8,
-                            # showscale=True,
-                        ),
-                    ),
-                ],
-                traces=[0],
+                data=frame_data,
+                # traces=[0],
                 name=str(k),
             )
         )

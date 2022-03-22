@@ -32,4 +32,4 @@ events.detector = det
 events.redistribute(0, 10000)
 
 
-plot_timeline(event_collection=events)
+plot_timeline(event_collection=events, draw_records=True)
