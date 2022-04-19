@@ -19,6 +19,12 @@ parser.add_argument(
     "--mode", required=True, choices=["tfirst", "full", "counts"], dest="mode"
 )
 
+parser.add_argument(
+    "--event_type",
+    required=True,
+    choices=["track", "cascade", "double_cascade"],
+    dest="ev_type",
+)
 
 args = parser.parse_args()
 
@@ -43,7 +49,7 @@ os.chmod(runsh_file, st.st_mode | stat.S_IEXEC)
 arg_list = (
     f"-s $(spacing) --seed $(seed) --shape_model {args.shape_model} "
     f"--counts_model {args.counts_model} --pmts $(pmts) --mode {args.mode} --det $(det) "
-    f"--nsamples 75 --nev 1 -o {outfile_path} double_casc -e $(energy)"
+    f"--nsamples 75 --nev 1 -o {outfile_path} {args.ev_type} -e $(energy)"
 )
 
 if not args.for_slurm:
