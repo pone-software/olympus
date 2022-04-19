@@ -8,7 +8,6 @@ os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.8"
 import functools
 
 import numpy as np
-from jax import random
 import jax.numpy as jnp
 from olympus.event_generation.detector import (
     make_triang,
@@ -25,13 +24,13 @@ from olympus.event_generation.photon_propagation.norm_flow_photons import (
 from olympus.optimization.fisher_information import (
     calc_fisher_info_cascades,
     calc_fisher_info_double_cascades,
+    calc_fisher_info_tracks,
 )
 
 from hyperion.constants import Constants
-from hyperion.medium import cascadia_ref_index_func, sca_len_func_antares
+from hyperion.medium import cascadia_ref_index_func
 
 from olympus.event_generation.detector import (
-    generate_noise,
     sample_cylinder_surface,
     sample_cylinder_volume,
     sample_direction,
@@ -57,6 +56,9 @@ parser_dbl_casc.add_argument("-e", "--energy", type=float, required=True)
 # parser_dbl_casc.add_argument("--separation", type=float, required=True)
 
 parser_casc = subparsers.add_parser("casc")
+parser_casc.add_argument("-e", "--energy", type=float, required=True)
+
+parser_casc = subparsers.add_parser("track")
 parser_casc.add_argument("-e", "--energy", type=float, required=True)
 
 args = parser.parse_args()
@@ -136,6 +138,26 @@ for _ in range(args.nev):
         event_data["dir"] = sph_to_cart_jnp(event_data["theta"], event_data["phi"])
 
         call_func = calc_fisher_info_cascades
+
+    elif args.ev_type == "track":
+
+        event_pos = sample_cylinder_surface(height, radius, 1, rng).squeeze()
+        event_dir = sample_direction(1, rng).squeeze()
+
+        theta = np.arccos(event_dir[2])
+        phi = np.arccos(event_dir[0] / np.sin(theta))
+
+        event_data = {
+            "time": 0.0,
+            "theta": theta,
+            "phi": phi,
+            "pos": event_pos,
+            "energy": args.energy,
+            "particle_id": 11,
+        }
+        event_data["dir"] = sph_to_cart_jnp(event_data["theta"], event_data["phi"])
+
+        call_func = calc_fisher_info_tracks
 
     elif args.ev_type == "double_casc":
 

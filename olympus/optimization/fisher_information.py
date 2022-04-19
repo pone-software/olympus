@@ -18,13 +18,14 @@ from ..event_generation.constants import Constants
 from functools import partial
 
 
-def pad_event(event):
+def pad_event(array):
+    if ak.count(array) == 0:
+        return np.array([np.inf], dtype=np.float)
+    pad_len = np.int32(np.ceil(ak.count(array) / 256) * 256)
 
-    pad_len = np.int32(np.ceil(ak.max(ak.count(event, axis=1)) / 256) * 256)
-
-    if ak.max(ak.count(event, axis=1)) > pad_len:
+    if ak.count(array) > pad_len:
         raise RuntimeError()
-    padded = ak.pad_none(event, target=pad_len, clip=True, axis=1)
+    padded = ak.pad_none(array, target=pad_len, clip=True, axis=0)
     # mask = ak.is_none(padded, axis=1)
     ev_np = np.asarray((ak.fill_none(padded, np.inf)))
     return ev_np
@@ -668,7 +669,7 @@ def calc_fisher_info_tracks(
                 eval_func = eval_jacobian
 
             if mode == "full":
-                padded = pad_array_log_bucket(event[j], pad_base)
+                padded = pad_event(event[j])
             elif mode == "tfirst":
                 if len(event[j]) == 0:
                     padded = jnp.asarray([])
