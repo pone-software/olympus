@@ -7,7 +7,7 @@ from olympus.event_generation.detector import make_triang, Detector, make_line
 from olympus.plotting.plotting import plot_timeline
 
 
-filename = os.path.join(os.path.dirname(__file__), '../../data/events_track_0.pickle')
+filename = os.path.join(os.path.dirname(__file__), '../../data/tracks/events_track_0.pickle')
 
 events = EventCollection.from_pickle(filename)
 

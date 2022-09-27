@@ -163,4 +163,4 @@ def get_event_times_by_rate(rate: float, start_time: int, end_time: int, rng=np.
     time_range = [start_time, end_time]
     dT = np.diff(time_range)
     number_events = rng.poisson(rate * dT)
-    return rng.random_integers(*time_range, size=number_events)
+    return rng.random_integers(*time_range, size=number_events) * 1.0
