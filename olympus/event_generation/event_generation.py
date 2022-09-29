@@ -12,6 +12,7 @@ from abc import ABC, abstractmethod
 import awkward as ak
 import numpy as np
 from jax import random
+from jax import numpy as jnp
 from tqdm.auto import trange
 from .constants import Constants, defaults
 from .detector import (
@@ -47,6 +48,53 @@ def simulate_noise(det, event, noise_window_len, rng):
     return event, noise
 
 
+def make_single_casc_source(event_data, converter_func, key):
+
+    sources = converter_func(
+        event_data["pos"],
+        event_data["time"],
+        event_data["dir"],
+        event_data["energy"],
+        event_data["particle_id"],
+        key=key,
+    )
+
+    return sources
+
+
+def make_double_casc_source(event_data, converter_func, key):
+    k1, k2 = random.split(key)
+    source_pos, source_dir, source_time, source_nphotons = converter_func(
+        event_data["pos"],
+        event_data["time"],
+        event_data["dir"],
+        event_data["energy"],
+        event_data["particle_id"],
+        key=k1,
+    )
+
+    pos2 = event_data["pos2"]
+    t2 = (
+        event_data["time"] + jnp.linalg.norm(event_data["pos"] - pos2) / Constants.c_vac
+    )
+
+    source_pos2, source_dir2, source_time2, source_nphotons2 = converter_func(
+        pos2,
+        t2,
+        event_data["dir"],
+        event_data["energy2"],
+        event_data["particle_id"],
+        key=k2,
+    )
+
+    source_pos = jnp.concatenate([source_pos, source_pos2])
+    source_dir = jnp.concatenate([source_dir, source_dir2])
+    source_time = jnp.concatenate([source_time, source_time2])
+    source_nphotons = jnp.concatenate([source_nphotons, source_nphotons2])
+
+    return source_pos, source_dir, source_time, source_nphotons
+
+
 def generate_cascade(
     det,
     event_data,
@@ -73,17 +121,60 @@ def generate_cascade(
 
     k1, k2 = random.split(seed)
 
-    source_pos, source_dir, source_time, source_nphotons = converter_func(
-        event_data["pos"],
-        event_data["time"],
-        event_data["dir"],
-        event_data["energy"],
-        event_data["particle_id"],
-        key=k1,
+    source_pos, source_dir, source_time, source_nphotons = make_single_casc_source(
+        event_data, converter_func, k1
     )
 
     record = MCRecord(
         "cascade",
+        source_array_to_sources(source_pos, source_dir, source_time, source_nphotons),
+        event_data,
+    )
+
+    propagation_result = pprop_func(
+        det.module_coords,
+        det.module_efficiencies,
+        source_pos,
+        source_dir,
+        source_time,
+        source_nphotons,
+        seed=k2,
+    )
+
+    return propagation_result, record
+
+
+def generate_double_cascade(
+    det,
+    event_data,
+    seed,
+    pprop_func,
+    converter_func,
+):
+    """
+    Generate a double cascade with given amplitude and position and return time of detected photons.
+
+    Parameters:
+        det: Detector
+            Instance of Detector class
+        event_data: dict
+            Container of the event data
+        seed: int
+        pprop_func: function
+            Function to calculate the photon signal
+        converter_func: function
+            Function to calculate number of photons as function of energy
+
+    """
+
+    k1, k2 = random.split(seed, 2)
+
+    source_pos, source_dir, source_time, source_nphotons = make_double_casc_source(
+        event_data, converter_func, k1
+    )
+
+    record = MCRecord(
+        "double_cascade",
         source_array_to_sources(source_pos, source_dir, source_time, source_nphotons),
         event_data,
     )
