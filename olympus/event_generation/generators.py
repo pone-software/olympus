@@ -209,7 +209,7 @@ class RandomNoiseGenerator(AbstractGenerator):
             key=self.get_key(),
             direction=np.zeros((3,)),
             energy=0.0,
-            start_position=np.zeros_like((3,)),
+            start_position=np.zeros((3,)),
             time=0
             ))]
 
@@ -262,8 +262,9 @@ class GeneratorFactory:
 
 
 class GeneratorCollection:
-    def __init__(self) -> None:
+    def __init__(self, detector: Detector = None) -> None:
         self.generators = []
+        self.detector = detector
 
     def add_generator(self, generator: Type[AbstractGenerator]):
         self.generators.append(generator)
@@ -277,7 +278,7 @@ class GeneratorCollection:
             events += generator_events
             records += generator_records
 
-        return EventCollection(events=events, records=records)
+        return EventCollection(events=events, records=records, detector=self.detector)
 
     def generate_per_timeframe(self, start_time: int, end_time: int):
         return self.generate(start_time=start_time, end_time=end_time)
