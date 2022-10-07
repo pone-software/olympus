@@ -1,7 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from multiprocessing import Pool, cpu_count
-from typing import Optional, List, Tuple, Type
+from typing import Optional, List, Union, Tuple
 import logging
 import os
 
@@ -9,40 +8,75 @@ import pickle
 
 import numpy as np
 import awkward as ak
+import pandas as pd
 from awkward.partition import every
-
-from jax import random
 
 from .detector import Detector
 from .mc_record import MCRecord
 from .constants import defaults
+from .photon_source import PhotonSource
 
 
 @dataclass
 class EventData:
-    key: str
     direction: np.ndarray
     energy: np.ndarray
     time: int
     start_position: np.ndarray
+    key: Optional[str] = None
     length: Optional[float] = None
     particle_id: Optional[int] = None
+
+@dataclass
+class EventRecord:
+    type: str
+    sources: List[PhotonSource]
+    data: EventData
+
+    @classmethod
+    def from_mc_record(cls, mc_record: MCRecord) -> EventRecord:
+        info = mc_record.mc_info[0]
+        if not isinstance(info, EventData):
+            info = EventData(
+                direction=info["dir"],
+                energy=info["energy"],
+                time=info["time"],
+                start_position=info["pos"],
+            )
+        return cls(type=mc_record.event_type, sources=mc_record.sources, data=info)
+
+    def to_dict(self):
+        return {
+            'type' : self.type,
+            'energy': self.data.energy,
+            'time': self.data.time,
+            'pos_x': self.data.start_position[0],
+            'pos_y': self.data.start_position[1],
+            'pos_z': self.data.start_position[2],
+            'dir_x': self.data.direction[0],
+            'dir_y': self.data.direction[1],
+            'dir_z': self.data.direction[2],
+        }
 
 
 @dataclass
 class EventCollection:
     events: List[ak.Array]
-    records: List[MCRecord]
+    records: List[Union[EventRecord, MCRecord]]
     detector: Optional[Detector] = None
 
     rng: Optional[np.random.RandomState] = defaults["rng"]
     seed: Optional[int] = defaults["seed"]
 
+    def __post_init__(self):
+        for x in range(len(self.records)):
+            if isinstance(self.records[x], MCRecord):
+                self.records[x] = EventRecord.from_mc_record(self.records[x])
+
     def __len__(self):
         return len(self.events)
 
-    # def generate_histogram(self, step_size=50, number_of_modules=None, event_index=None) -> Tuple[np.ndarray, np.ndarray]:
-    def generate_histogram(self, step_size=50, start_time=None, end_time=None, number_of_modules=None, event_index=None) -> np.ndarray:
+    def generate_histogram(self, step_size=50, start_time=None, end_time=None, number_of_modules=None, event_index=None) -> Tuple[np.ndarray, pd.DataFrame, np.ndarray]:
 
         events_to_account = []
         records_to_account = []
@@ -52,9 +86,13 @@ class EventCollection:
         if self.detector is not None and number_of_modules is None:
             number_of_modules = len(self.detector.modules)
 
-        short_collection = self.get_within_timeframe(start_time, end_time)
-
-        events_to_enumerate = short_collection.events
+        if start_time is not None and end_time is not None:
+            short_collection = self.get_within_timeframe(start_time, end_time)
+            events_to_enumerate = short_collection.events
+            records_to_enumerate = short_collection.records
+        else:
+            events_to_enumerate = self.events
+            records_to_enumerate = self.records
 
         if event_index is not None:
             events_to_enumerate = [events_to_enumerate[event_index]]
@@ -62,7 +100,7 @@ class EventCollection:
         for event_loop_index, event in enumerate(events_to_enumerate):
             if len(event) == number_of_modules:
                 events_to_account.append(event)
-                records_to_account.append(short_collection.records[event_loop_index])
+                records_to_account.append(records_to_enumerate[event_loop_index])
 
         if not len(events_to_account):
             logging.warning('No events to generate Histogram')
@@ -82,6 +120,7 @@ class EventCollection:
         partitioned_events_to_account = ak.repartition(regular_array, 100, highlevel=False)
 
         histogram = np.zeros([number_of_modules, bins])
+        timings = np.arange(0, bins * step_size, step_size)
 
         for partition in every(partitioned_events_to_account):
             # Ensure second dimension is at number of modules
@@ -92,27 +131,10 @@ class EventCollection:
             for module_index, module in enumerate(concatenated_events):
                 histogram[module_index] += np.histogram(ak.to_numpy(module), bins=bins, range=(start_time, end_time))[0]
 
-        slim_records_data = []
+        slim_records_data = self.get_info_as_panda(records_to_account)
+        times = np.arange(start_time, end_time, step_size)
 
-        # TODO Split in two different functions
-        for record in records_to_account:
-            info = record.mc_info
-            if isinstance(info, list):
-                info = info[0]
-            slim_records_data.append({
-                'time': info.time,
-                'event': record.event_type
-            })
-
-        # record_histograms = []
-        #
-        # for record in self.records:
-        #     for source in record.sources:
-        #         record_histograms.append(np.histogram([source.time], bins=bins, range=(min,max))[0])
-
-        return histogram, slim_records_data
-
-        # return np.array(histograms), np.array(record_histograms)
+        return histogram, slim_records_data, times
 
     def redistribute(
         self,
@@ -138,41 +160,14 @@ class EventCollection:
             raise ValueError('Either rate or end time have to be provided')
 
         for index, record in enumerate(self.records):
-            info = record.mc_info
-
-            if not isinstance(info, EventData):
-                if isinstance(info, list):
-                    info = info[0]
-                if "key" not in info:
-                    key, subkey = random.split(random.PRNGKey(self.seed))
-                obj_info = EventData(
-                    key=subkey,
-                    direction=info["dir"],
-                    energy=info["energy"],
-                    time=info["time"],
-                    start_position=info["pos"],
-                )
-
-                if "length" in info:
-                    obj_info.length = info["length"]
-
-                if "particle_id" in info:
-                    obj_info.particle_id = info["particle_id"]
-
-                info = obj_info
-
-                record.mc_info = obj_info
-
-            start_time = info.time
+            start_time = record.data.time
             end_time = times_det[index]
 
             for source in record.sources:
                 source.time = source.time - start_time + end_time
 
             self.events[index] = self.events[index] - start_time + end_time
-            info.time = end_time
-
-            record.mc_info = info
+            record.data.time = end_time
         logging.info('Finish redistribute events (start %s, end %s, rate %s)', start_time, end_time, rate)
 
     def get_within_timeframe(self, start_time: int, end_time: int = None) -> EventCollection:
@@ -181,11 +176,7 @@ class EventCollection:
 
         logging.info('Start collecting events within %d and %d (%d Events available)', start_time, end_time, len(self))
         for index, record in enumerate(self.records):
-            # TODO: Remove or properly add list behaviour
-            info = record.mc_info
-            if isinstance(info, list):
-                info = info[0]
-            record_time = info.time
+            record_time = record.data.time
             if start_time <= record_time and (end_time is None or record_time < end_time):
                 events.append(self.events[index])
                 records.append(record)
@@ -194,6 +185,20 @@ class EventCollection:
 
 
         return EventCollection(records=records, events=events, detector=self.detector, rng=self.rng, seed=self.seed)
+
+    def get_info_as_panda(self, records=None) -> pd.DataFrame:
+        records_list = []
+        if records is None:
+            records = self.records
+        for record in records:
+            records_list.append(record.to_dict())
+
+        return pd.DataFrame(records_list)
+
+    def save(self, path, batch_size: int=100, filename: str ='part_{index}.pickle'):
+        self.to_folder(path, batch_size, filename)
+        df = self.get_info_as_panda()
+        df.to_csv(os.path.join(path, 'records.csv'))
 
     def to_pickle(self, filename):
         file = open(filename, 'wb')
@@ -236,9 +241,6 @@ class EventCollection:
 
     @classmethod
     def from_pickles(cls, filenames: List):
-        events = []
-        records = []
-
         if len(filenames) == 0:
             logging.warning('Imported empty collection')
             return EventCollection(events=[], records=[])
@@ -258,49 +260,10 @@ class EventCollection:
                     logging.warning('Imported multiple detectors')
                 if result.seed != final_collection.seed:
                     logging.warning('Imported multiple seeds')
-                # TODO: Check why errors
-                # if result.rng != final_collection.rng:
-                #     logging.warning('Imported multiple rngs')
                 final_collection.events += result.events
                 final_collection.records += result.records
 
-            logging.debug('File %s loaded', f)
-
-        # TODO: Make multiprocessing work again
-        # global load_single_pickle
-        # def load_single_pickle(filename) -> EventCollection:
-        #     with open(filename, 'rb') as f:
-        #         data = pickle.load(f)
-        #         f.close()
-        #     logging.debug('File %s loaded', f)
-        #
-        #     if isinstance(data, EventCollection):
-        #         return data
-        #
-        #     return EventCollection(events=data[0], records=data[1])
-        #
-        # p = Pool(cpu_count(), maxtasksperchild=1000)
-        #
-        # combined = p.map(load_single_pickle, filenames)
-        #
-        # p.close()
-        #
-        # if len(combined) == 0:
-        #     logging.warning('Imported empty collection')
-        #     return EventCollection(events=[], records=[])
-        #
-        # final_collection = combined[0]
-        #
-        # for result in combined[1:]:
-        #     if result.detector != final_collection.detector:
-        #         logging.warning('Imported multiple detectors')
-        #     if result.seed != final_collection.seed:
-        #         logging.warning('Imported multiple seeds')
-        #     # TODO: Check why errors
-        #     # if result.rng != final_collection.rng:
-        #     #     logging.warning('Imported multiple rngs')
-        #     final_collection.events += result.events
-        #     final_collection.records += result.records
+            logging.info('File %s loaded', f)
 
         return final_collection
 
