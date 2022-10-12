@@ -124,7 +124,7 @@ event_collection = generator_collection.generate(
     end_time=100,
 )
 
-event_collection.save('./data/test')
+event_collection.save('./dataset/test')
 
 # 1 redistribute events
 # 2 stupidest network possible
