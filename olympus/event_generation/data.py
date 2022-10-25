@@ -76,15 +76,16 @@ class EventCollection:
     def __len__(self):
         return len(self.events)
 
-    def generate_histogram(self, step_size=50, start_time=None, end_time=None, number_of_modules=None, event_index=None) -> Tuple[np.ndarray, pd.DataFrame, np.ndarray]:
+    def __getitem__(self, item):
+        return EventCollection(detector=self.detector, events=self.events[item], records=self.records[item], rng=self.rng, seed=self.seed)
+
+    def generate_histogram(self, step_size=50, start_time=None, end_time=None) -> Tuple[np.ndarray, pd.DataFrame, np.ndarray]:
 
         events_to_account = []
         records_to_account = []
-        if number_of_modules is None and self.detector is None:
-            raise ValueError('Either number of modules or detector is not provided.')
-
-        if self.detector is not None and number_of_modules is None:
-            number_of_modules = len(self.detector.modules)
+        if self.detector is None:
+            raise ValueError('detector is not provided.')
+        number_of_modules = len(self.detector.modules)
 
         if start_time is not None and end_time is not None:
             short_collection = self.get_within_timeframe(start_time, end_time)
@@ -93,9 +94,6 @@ class EventCollection:
         else:
             events_to_enumerate = self.events
             records_to_enumerate = self.records
-
-        if event_index is not None:
-            events_to_enumerate = [events_to_enumerate[event_index]]
 
         for event_loop_index, event in enumerate(events_to_enumerate):
             if len(event) == number_of_modules:

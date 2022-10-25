@@ -110,7 +110,7 @@ def generate_cascade(
         det: Detector
             Instance of Detector class
         event_data: dict
-            Container of the event data
+            Container of the event dataset
         seed: int
         pprop_func: function
             Function to calculate the photon signal
@@ -370,7 +370,7 @@ def generate_realistic_track(
         det: Detector
             Instance of Detector class
         event_data: dict
-            Container of the event data
+            Container of the event dataset
         seed: PRNGKey
         pprop_func: function
             Function to calculate the photon signal
