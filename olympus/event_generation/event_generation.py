@@ -1,19 +1,14 @@
 """Event Generators."""
-from dataclasses import dataclass
 import functools
 import logging
-import string
-from time import time
-from turtle import position
-from typing import Any, Callable, Optional, List
-from abc import ABC, abstractmethod
-
+from typing import Callable, Optional, List
 
 import awkward as ak
 import numpy as np
-from jax import random
 from jax import numpy as jnp
+from jax import random
 from tqdm.auto import trange
+
 from .constants import Constants, defaults
 from .detector import (
     Detector,
@@ -25,7 +20,6 @@ from .detector import (
 from .lightyield import make_pointlike_cascade_source, make_realistic_cascade_source
 from .mc_record import MCRecord
 from .photon_propagation.utils import source_array_to_sources
-from .photon_source import PhotonSource
 from .utils import get_event_times_by_rate, track_isects_cyl
 
 logger = logging.getLogger(__name__)
@@ -101,7 +95,6 @@ def generate_cascade(
     seed,
     pprop_func,
     converter_func,
-    rng=_default_rng
 ):
     """
     Generate a single cascade with given amplitude and position and return time of detected photons.
@@ -110,7 +103,7 @@ def generate_cascade(
         det: Detector
             Instance of Detector class
         event_data: dict
-            Container of the event dataset
+            Container of the event data
         seed: int
         pprop_func: function
             Function to calculate the photon signal
@@ -215,11 +208,11 @@ def generate_cascades(
     for i in trange(nsamples):
         pos = sample_cylinder_volume(cylinder_height, cylinder_radius, 1, rng).squeeze()
         energy = _get_event_energy(log_emin=log_emin, log_emax=log_emax, rng=rng)
-        dir = _get_event_direction(rng=rng)
+        direction = _get_event_direction(rng=rng)
 
         event_data = {
             "pos": pos,
-            "dir": dir,
+            "dir": direction,
             "energy": energy,
             "time": 0,
             "particle_id": particle_id,
@@ -361,7 +354,6 @@ def generate_realistic_track(
     key,
     pprop_func,
     proposal_prop,
-    rng=_default_rng
 ):
     """
     Generate a realistic track using energy losses from PROPOSAL.
@@ -370,7 +362,7 @@ def generate_realistic_track(
         det: Detector
             Instance of Detector class
         event_data: dict
-            Container of the event dataset
+            Container of the event data
         seed: PRNGKey
         pprop_func: function
             Function to calculate the photon signal
@@ -431,6 +423,7 @@ def generate_realistic_track(
     )
     return propagation_result, record
 
+
 def generate_realistic_starting_track(
     det,
     event_data,
@@ -462,7 +455,6 @@ def generate_realistic_starting_track(
     cascade, cascade_record = generate_cascade(
         det,
         event_data,
-        key=key,
         pprop_func=pprop_func,
         converter_func=functools.partial(
             make_realistic_cascade_source, moliere_rand=True, resolution=0.2
@@ -482,28 +474,31 @@ def generate_realistic_starting_track(
 
     return event, record
 
+
 def _generate_times_from_rate(
     rate: float,
     start_time: int,
     end_time: int,
-    rng = _default_rng
+    rng=_default_rng
 ) -> List[int]:
     times_det = get_event_times_by_rate(rate=rate, start_time=start_time, end_time=end_time, rng=rng)
 
     return ak.sort(ak.Array(times_det))
 
+
 def _get_event_energy(log_emin: float, log_emax: float, rng=_default_rng) -> np.ndarray:
     return np.power(10, rng.uniform(log_emin, log_emax, size=1))
 
+
 def _get_event_direction(rng=_default_rng) -> np.ndarray:
     return sample_direction(1, rng).squeeze()
+
 
 def _generate_events(
     det: Detector,
     log_emin: float,
     log_emax: float,
     gen_func: Callable,
-    pos_func: Callable,
     pprop_func: Callable,
     nsamples: Optional[int] = None,
     rate: Optional[float] = None,
@@ -516,21 +511,18 @@ def _generate_events(
     rng = np.random.RandomState(seed)
     key, subkey = random.split(random.PRNGKey(seed))
 
-    events = []
-    records = []
-
     if nsamples is None and (rate is None or end_time is None):
         raise ValueError('Either number of samples or time parameters must be set')
 
     time_based = nsamples is None
 
     if time_based:
-        iterator_range = _generate_times_from_rate(rate=rate, start_time=start_time, end_time=end_time, seed=seed)
+        iterator_range = _generate_times_from_rate(rate=rate, start_time=start_time, end_time=end_time, rng=rng)
     else:
         iterator_range = trange(nsamples)
     
-    cylinder_height= det.outer_cylinder[1] + 100
-    cylinder_radius= det.outer_cylinder[0] + 50
+    cylinder_height = det.outer_cylinder[1] + 100
+    cylinder_radius = det.outer_cylinder[0] + 50
 
     # TODO: Calculate intersection with generation cylinder
     track_length = 3000
@@ -539,7 +531,7 @@ def _generate_events(
     records = []
 
     for i in iterator_range:
-        pos = sample_cylinder_volume(cylinder_height=cylinder_height, cylinder_radius=cylinder_radius, n=1, rng=rng)
+        pos = sample_cylinder_volume(height=cylinder_height, radius=cylinder_radius, n=1, rng=rng)
         energy = _get_event_energy(log_emin=log_emin, log_emax=log_emax, rng=rng)
         direc = _get_event_direction(rng=rng)
 
@@ -569,8 +561,6 @@ def _generate_events(
     return events, records
 
 
-
-
 def generate_realistic_tracks(
     det,
     cylinder_height,
@@ -581,7 +571,6 @@ def generate_realistic_tracks(
     log_emax,
     pprop_func,
     proposal_prop=None,
-    times=None,
     noise_function=None,
 ):
     """Generate realistic muon tracks."""
@@ -590,13 +579,6 @@ def generate_realistic_tracks(
 
     events = []
     records = []
-
-    time_based = times is None
-
-    if time_based:
-        iterator_range = times
-    else:
-        pass
 
     for i in trange(nsamples):
         pos = sample_cylinder_surface(

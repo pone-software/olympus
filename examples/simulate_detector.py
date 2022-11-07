@@ -1,58 +1,22 @@
-from asyncio import events
-from datetime import datetime
-import os
 import json
-
-os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.5"
+import os
+import pickle
 
 import matplotlib.pyplot as plt
 import numpy as np
-
-import seaborn as sns
-
-
-from itertools import product
-
-import awkward as ak
-import pandas as pd
-
-from olympus.event_generation.photon_propagation.norm_flow_photons import (
-    make_generate_norm_flow_photons,
-    make_nflow_photon_likelihood,
-)
-from olympus.event_generation.data import EventData
-from olympus.event_generation.photon_propagation.utils import sources_to_model_input
-from olympus.event_generation.detector import (
-    make_hex_grid,
-    Detector,
-    make_line,
-    make_triang,
-    make_rhombus,
-)
-from olympus.event_generation.event_generation import (
-    generate_cascade,
-    generate_cascades,
-    simulate_noise,
-    generate_realistic_track,
-    generate_realistic_tracks,
-    generate_realistic_starting_tracks,
-)
-from olympus.event_generation.lightyield import (
-    make_pointlike_cascade_source,
-    make_realistic_cascade_source,
-)
-from olympus.event_generation.utils import sph_to_cart_jnp, proposal_setup
-from olympus.plotting import plot_timeline
-from olympus.event_generation.generators import GeneratorCollection, GeneratorFactory
-from olympus.event_generation.propagator import CascadePropagator
-
-from hyperion.medium import medium_collections
-from hyperion.constants import Constants
-
-
-from jax import random
 from jax import numpy as jnp
 
+from hyperion.constants import Constants
+from hyperion.medium import medium_collections
+from olympus.event_generation.detector import (
+    make_triang,
+)
+from olympus.event_generation.generators import GeneratorCollection, GeneratorFactory
+from olympus.event_generation.photon_propagation.norm_flow_photons import (
+    make_generate_norm_flow_photons,
+)
+
+os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.5"
 
 
 path_to_config = "../../hyperion/data/pone_config_optimistic.json"
@@ -76,7 +40,7 @@ module_radius = 0.21  # m
 
 # Calculate the relative area covered by PMTs
 efficiency = (
-    pmts_per_module * (pmt_cath_area_r) ** 2 * np.pi / (4 * np.pi * module_radius**2)
+        pmts_per_module * pmt_cath_area_r ** 2 * np.pi / (4 * np.pi * module_radius ** 2)
 )
 det = make_triang(
     side_len, oms_per_line, dist_z, dark_noise_rate, rng, efficiency=efficiency
@@ -124,7 +88,6 @@ event_collection = generator_collection.generate(
     end_time=100,
 )
 
-event_collection.save('./dataset/test')
 
-# 1 redistribute events
-# 2 stupidest network possible
+pickle.dump(event_collection, open('./dataset/test', "wb"))
+

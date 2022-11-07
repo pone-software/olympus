@@ -344,7 +344,7 @@ def sample_cylinder_volume(height, radius, n, rng=np.random.RandomState(1337)):
     return samples
 
 
-def sample_direction(n_samples, rng=np.random.RandomState(1337)) -> np.ndarray:
+def sample_direction(n_samples, rng=np.random.RandomState(1337)):
     """Sample uniform directions."""
     cos_theta = rng.uniform(-1, 1, size=n_samples)
     theta = np.arccos(cos_theta)

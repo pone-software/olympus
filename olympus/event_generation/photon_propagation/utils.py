@@ -211,10 +211,10 @@ def bayesian_blocks(
     It has been modified to natively accept weighted events, for ease of use in HEP applications.
 
     Args:
-        data: Input dataset values (one dimensional, length N). Repeat values are allowed.
+        data: Input data values (one dimensional, length N). Repeat values are allowed.
 
-        weights: Weights for dataset (otherwise assume all dataset points have a weight of 1).
-          Must be same length as dataset. Defaults to None.
+        weights: Weights for data (otherwise assume all data points have a weight of 1).
+          Must be same length as data. Defaults to None.
 
         p0: False-positive rate, between 0 and 1.  A lower number places a stricter penalty
           against creating more bin edges, thus reducing the potential for false-positive bin edges. In general,
@@ -228,25 +228,25 @@ def bayesian_blocks(
          Array containing the (N+1) bin edges
 
     Examples:
-        Unweighted dataset:
+        Unweighted data:
 
         >>> d = np.random.normal(size=100)
         >>> bins = bayesian_blocks(d, p0=0.01)
 
-        Unweighted dataset with repeats:
+        Unweighted data with repeats:
 
         >>> d = np.random.normal(size=100)
         >>> d[80:] = d[:20]
         >>> bins = bayesian_blocks(d, p0=0.01)
 
-        Weighted dataset:
+        Weighted data:
 
         >>> d = np.random.normal(size=100)
         >>> w = np.random.uniform(1,2, size=100)
         >>> bins = bayesian_blocks(d, w, p0=0.01)
 
     """
-    # validate input dataset
+    # validate input data
     data = np.asarray(data, dtype=float)
     assert data.ndim == 1
 
@@ -260,12 +260,12 @@ def bayesian_blocks(
     # initialize the prior
     prior = Prior(p0, gamma)
 
-    # Place dataset and weights into a DataFrame.
-    # We want to sort the dataset array (without losing the associated weights), and combine duplicate
-    # dataset points by summing their weights together.  We can accomplish all this with `groupby`
+    # Place data and weights into a DataFrame.
+    # We want to sort the data array (without losing the associated weights), and combine duplicate
+    # data points by summing their weights together.  We can accomplish all this with `groupby`
 
-    df = pd.DataFrame({"dataset": data, "weights": weights})
-    gb = df.groupby("dataset").sum()
+    df = pd.DataFrame({"data": data, "weights": weights})
+    gb = df.groupby("data").sum()
     data = gb.index.values
     weights = gb.weights.values
 
@@ -280,7 +280,7 @@ def bayesian_blocks(
     last = np.zeros(N, dtype=int)
 
     # -----------------------------------------------------------------
-    # Start with first dataset cell; add one cell at each iteration
+    # Start with first data cell; add one cell at each iteration
     # -----------------------------------------------------------------
     # last = core_loop(N, block_length, weights, fitfunc, best, last)
     for R in range(N):

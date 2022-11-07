@@ -16,7 +16,7 @@ class AbstractInjector(ABC):
         rng: Optional[np.random.RandomState] = defaults['rng'],
         **kwargs,
     ) -> None:
-        super().__init__()
+        super().__init__(**kwargs)
         self.detector = detector
         self.radius_extension = radius_extension
         self.height_extension = height_extension
@@ -54,8 +54,6 @@ class SurfaceInjector(AbstractInjector):
     ) -> np.ndarray:
         """Sample points on a cylinder surface.
 
-        :param rng: random number generator, defaults to defaults['rng']
-        :type rng: Optional[np.random.RandomState], optional
         :param n: number of positions to generate, defaults to 1
         :type n: Optional[int], optional
         :return: numpy array containing all the positions as numpy arrays

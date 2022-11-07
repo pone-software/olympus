@@ -3,7 +3,6 @@ import logging
 
 import jax.numpy as jnp
 import numpy as np
-import awkward as ak
 from scipy.integrate import quad
 
 from .constants import Constants
@@ -161,6 +160,6 @@ def deposited_energy(det, record):
 
 def get_event_times_by_rate(rate: float, start_time: int, end_time: int, rng=np.random.RandomState(1337)) -> np.ndarray:
     time_range = [start_time, end_time]
-    dT = np.diff(time_range)
-    number_events = rng.poisson(rate * dT)
+    time_difference = np.diff(time_range)
+    number_events = rng.poisson(rate * time_difference)
     return rng.random_integers(*time_range, size=number_events) * 1.0

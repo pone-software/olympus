@@ -3,6 +3,7 @@ import dataclasses
 from typing import Optional
 from jax import random
 import awkward as ak
+import copy
 
 import numpy as np
 
@@ -21,17 +22,18 @@ from .photon_propagation.utils import source_array_to_sources
 
 class AbstractPropagator(ABC):
     def __init__(
-        self,
-        detector: Detector,
-        photon_propagator: callable,
-        name: str,
-        rng: Optional[np.random.RandomState] = defaults['rng'],
-        **kwargs
+            self,
+            detector: Detector,
+            photon_propagator: callable,
+            name: str,
+            rng: Optional[np.random.RandomState] = defaults['rng'],
+            **kwargs
     ) -> None:
         super().__init__()
         self.name = name
         self.detector = detector
         self.photon_propagator = photon_propagator
+        self.rng = rng
 
     @abstractmethod
     def _convert(self, event_data: EventData):
@@ -40,7 +42,7 @@ class AbstractPropagator(ABC):
     def propagate(self, event_data: EventData):
         key, k1, k2 = random.split(event_data.key, 3)
 
-        result = self._convert(event_data, k1)
+        result = self._convert(event_data=event_data)
 
         source_pos = result[0]
         source_dir = result[1]
@@ -89,17 +91,17 @@ class AbstractPropagator(ABC):
 
 class TrackPropagator(AbstractPropagator):
     def __init__(
-        self,
-        detector: Detector,
-        photon_propagator: callable,
-        name: str = "track",
-        rng: Optional[np.random.RandomState] = defaults['rng'],
-        **kwargs
+            self,
+            detector: Detector,
+            photon_propagator: callable,
+            name: str = "track",
+            rng: Optional[np.random.RandomState] = defaults['rng'],
+            **kwargs
     ) -> None:
-        super().__init__(detector, photon_propagator, name, rng)
+        super().__init__(detector, photon_propagator, name, rng, **kwargs)
         self.proposal_propagator = proposal_setup()
 
-    def _convert(self, event_data: EventData, k1):
+    def _convert(self, event_data: EventData, k1: str):
         return generate_muon_energy_losses(
             self.proposal_propagator,
             event_data.energy,
@@ -113,20 +115,20 @@ class TrackPropagator(AbstractPropagator):
 
 class CascadePropagator(AbstractPropagator):
     def __init__(
-        self,
-        detector: Detector,
-        photon_propagator: callable,
-        name: str = "cascade",
-        rng: Optional[np.random.RandomState] = defaults['rng'],
-        resolution: float = 0.2,
-        **kwargs
+            self,
+            detector: Detector,
+            photon_propagator: callable,
+            name: str = "cascade",
+            rng: Optional[np.random.RandomState] = defaults['rng'],
+            resolution: float = 0.2,
+            **kwargs
     ) -> None:
         super().__init__(
-            detector=detector, photon_propagator=photon_propagator, rng=rng, name=name
+            detector=detector, photon_propagator=photon_propagator, rng=rng, name=name, **kwargs
         )
         self.resolution = resolution
 
-    def _convert(self, event_data: EventData, k1):
+    def _convert(self, event_data: EventData, k1: str):
         return make_realistic_cascade_source(
             event_data.start_position,
             event_data.time,
@@ -141,29 +143,21 @@ class CascadePropagator(AbstractPropagator):
 
 class StartingTrackPropagator(TrackPropagator, CascadePropagator):
     def __init__(
-        self,
-        detector: Detector,
-        photon_propagator: callable,
-        name: str = "track_starting",
-        rng: Optional[np.random.RandomState] = defaults['rng'],
-        resolution: float = 0.2,
-        **kwargs
+            self,
+            detector: Detector,
+            photon_propagator: callable,
+            name: str = "track_starting",
+            rng: Optional[np.random.RandomState] = defaults['rng'],
+            resolution: float = 0.2,
+            **kwargs
     ) -> None:
-        TrackPropagator.__init__(
-            self,
-            detector=detector,
-            photon_propagator=photon_propagator,
-            name=name,
-            rng=rng,
-        )
-        CascadePropagator.__init__(
-            self,
+        super(StartingTrackPropagator, self).__init__(
             detector=detector,
             photon_propagator=photon_propagator,
             name=name,
             rng=rng,
             resolution=resolution,
-        )
+            **kwargs)
 
     def propagate(self, event_data: EventData):
         inelas = self.rng.uniform(1e-6, 1 - 1e-6)
@@ -179,10 +173,10 @@ class StartingTrackPropagator(TrackPropagator, CascadePropagator):
             cascade_event_data
         )
 
-        raw_energy = event_data["energy"]
-        track_event_data = event_data.copy()
+        raw_energy = event_data.energy
+        track_event_data = copy.copy(event_data)
 
-        track_event_data["energy"] = inelas * raw_energy
+        track_event_data.energy = inelas * raw_energy
 
         if (ak.count(track) == 0) & (ak.count(cascade) == 0):
             event = ak.Array([])

@@ -18,9 +18,8 @@ from .propagator import (
 )
 from .spectra import AbstractSpectrum, UniformSpectrum
 
-
 from .mc_record import MCRecord
-from .data import EventData, EventCollection
+from .data import EventData
 from .detector import Detector, sample_direction, generate_noise
 from .constants import defaults
 from .utils import get_event_times_by_rate
@@ -31,12 +30,12 @@ from .utils import get_event_times_by_rate
 
 class AbstractGenerator(ABC):
     def __init__(
-        self,
-        seed: Optional[int] = defaults["seed"],
-        rng: Optional[np.random.RandomState] = defaults["rng"],
-        *args,
-        **kwargs
-        ) -> None:
+            self,
+            seed: Optional[int] = defaults["seed"],
+            rng: Optional[np.random.RandomState] = defaults["rng"],
+            *args,
+            **kwargs
+    ):
         super().__init__()
         self.seed = seed
         self.rng = rng
@@ -47,30 +46,29 @@ class AbstractGenerator(ABC):
 
         return key
 
-
     @abstractmethod
     def generate(self, start_time=0, end_time=None, **kwargs) -> Tuple[List, List]:
         pass
 
     def generate_per_timeframe(
-        self, start_time: int, end_time: int, rate: Optional[float] = None
-    ):
+            self, start_time: int, end_time: int, rate: Optional[float] = None
+    ) -> Tuple[List, List]:
         return self.generate(start_time=start_time, end_time=end_time, rate=rate)
 
-    def generate_nsamples(self, nsamples: int, start_time: Optional[int] = 0):
+    def generate_nsamples(self, nsamples: int, start_time: Optional[int] = 0) -> Tuple[List, List]:
         return self.generate(nsamples=nsamples, start_time=start_time)
 
 
 class EventGenerator(AbstractGenerator):
     def __init__(
-        self,
-        injector: Type[AbstractInjector],
-        spectrum: Type[AbstractSpectrum],
-        propagator: Type[AbstractPropagator],
-        rate: Optional[float] = None,
-        particle_id: Optional[int] = None,
-        *args,
-        **kwargs
+            self,
+            injector: AbstractInjector,
+            spectrum: AbstractSpectrum,
+            propagator: AbstractPropagator,
+            rate: Optional[float] = None,
+            particle_id: Optional[int] = None,
+            *args,
+            **kwargs
     ) -> None:
         super().__init__(*args, **kwargs)
         self.injector = injector
@@ -80,16 +78,14 @@ class EventGenerator(AbstractGenerator):
         self.particle_id = particle_id
 
     def generate(
-        self,
-        n_samples: Optional[int] = None,
-        start_time: Optional[int] = 0,
-        end_time: Optional[int] = None,
+            self,
+            n_samples: Optional[int] = None,
+            start_time: Optional[int] = 0,
+            end_time: Optional[int] = None,
     ) -> Tuple[List, List]:
 
         """Generate realistic muon tracks."""
         key = self.get_key()
-        events = []
-        records = []
 
         if n_samples is None and (self.rate is None or end_time is None):
             raise ValueError("Either number of samples or time parameters must be set")
@@ -97,8 +93,6 @@ class EventGenerator(AbstractGenerator):
         time_based = n_samples is None
 
         if time_based:
-            if self.rate is None:
-                rate = self.rate
             times_det = get_event_times_by_rate(
                 rate=self.rate, start_time=start_time, end_time=end_time, rng=self.rng
             )
@@ -142,11 +136,11 @@ class EventGenerator(AbstractGenerator):
 
 class CascadeEventGenerator(EventGenerator):
     def __init__(
-        self,
-        detector: Detector,
-        photon_propagator: callable,
-        *args,
-        **kwargs
+            self,
+            detector: Detector,
+            photon_propagator: callable,
+            *args,
+            **kwargs
     ):
         injector = VolumeInjector(detector=detector, **kwargs)
         spectrum = UniformSpectrum(
@@ -161,9 +155,9 @@ class CascadeEventGenerator(EventGenerator):
 
 class TrackEventGenerator(EventGenerator):
     def __init__(
-        self, detector: Detector, photon_propagator: callable,
-        *args,
-        **kwargs
+            self, detector: Detector, photon_propagator: callable,
+            *args,
+            **kwargs
     ):
         injector = SurfaceInjector(detector=detector, **kwargs)
         spectrum = UniformSpectrum(
@@ -178,9 +172,9 @@ class TrackEventGenerator(EventGenerator):
 
 class StartingTrackEventGenerator(EventGenerator):
     def __init__(
-        self, detector: Detector, photon_propagator: callable,
-        *args,
-        **kwargs
+            self, detector: Detector, photon_propagator: callable,
+            *args,
+            **kwargs
     ):
         injector = VolumeInjector(detector=detector, **kwargs)
         spectrum = UniformSpectrum(
@@ -195,10 +189,10 @@ class StartingTrackEventGenerator(EventGenerator):
 
 class RandomNoiseGenerator(AbstractGenerator):
     def __init__(
-        self,
-        detector: Detector,
-        *args,
-        **kwargs
+            self,
+            detector: Detector,
+            *args,
+            **kwargs
     ):
         super().__init__(*args, **kwargs)
         self.detector = detector
@@ -211,30 +205,7 @@ class RandomNoiseGenerator(AbstractGenerator):
             energy=0.0,
             start_position=np.zeros((3,)),
             time=0
-            ))]
-
-class EventCollectionGenerator(AbstractGenerator):
-    def __init__(self,
-        event_collection: EventCollection,
-        rate: float = None,
-        *args,
-        **kwargs
-    ):
-        super().__init__(*args, **kwargs)
-        self.event_collection = event_collection
-        self.rate = rate
-
-    def generate(self, start_time=0, end_time=None, **kwargs) -> Tuple[List, List]:
-        if self.rate is not None:
-            self.event_collection.redistribute(start_time=start_time, rate=self.rate, rng=self.rng)
-        if end_time is not None:
-            new_collection = self.event_collection.get_within_timeframe(start_time, end_time)
-        else:
-            new_collection = self.event_collection
-
-        return new_collection.events, new_collection.records
-
-
+        ))]
 
 
 class GeneratorFactory:
@@ -243,8 +214,7 @@ class GeneratorFactory:
             "track": TrackEventGenerator,
             "starting_track": StartingTrackEventGenerator,
             "cascade": CascadeEventGenerator,
-            "noise": RandomNoiseGenerator,
-            "event_collection": EventCollectionGenerator
+            "noise": RandomNoiseGenerator
         }
         self.detector = detector
         self.photon_propagator = photon_propagator
@@ -252,7 +222,7 @@ class GeneratorFactory:
     def register_builder(self, key: str, builder: Type[AbstractGenerator]):
         self._builders[key] = builder
 
-    def create(self, key, **kwargs) -> Type[AbstractGenerator]:
+    def create(self, key, **kwargs) -> AbstractGenerator:
         builder = self._builders.get(key)
         if not builder:
             raise ValueError(key)
@@ -266,10 +236,10 @@ class GeneratorCollection:
         self.generators = []
         self.detector = detector
 
-    def add_generator(self, generator: Type[AbstractGenerator]):
+    def add_generator(self, generator: AbstractGenerator):
         self.generators.append(generator)
 
-    def generate(self, **kwargs) -> EventCollection:
+    def generate(self, **kwargs) -> Tuple[List, List]:
         events = []
         records = []
 
@@ -278,10 +248,10 @@ class GeneratorCollection:
             events += generator_events
             records += generator_records
 
-        return EventCollection(events=events, records=records, detector=self.detector)
+        return events, records
 
-    def generate_per_timeframe(self, start_time: int, end_time: int):
+    def generate_per_timeframe(self, start_time: int, end_time: int) -> Tuple[List, List]:
         return self.generate(start_time=start_time, end_time=end_time)
 
-    def generate_nsamples(self, nsamples: int):
+    def generate_nsamples(self, nsamples: int) -> Tuple[List, List]:
         return self.generate(nsamples=nsamples)
