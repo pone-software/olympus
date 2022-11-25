@@ -3,6 +3,9 @@ import os
 import pickle
 import numpy as np
 
+from ananke.schemas.detector import DetectorConfiguration
+from olympus.event_generation.detector import DetectorBuilder
+
 os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.5"
 
 from functools import partial
@@ -10,8 +13,6 @@ import json
 
 from hyperion.constants import Constants
 from hyperion.medium import medium_collections
-
-from olympus.event_generation.detector import Detector, make_line, make_triang
 from olympus.event_generation.event_generation import (
     generate_cascades,
     generate_realistic_starting_tracks,
@@ -48,9 +49,6 @@ def c_medium_f(wl):
     return Constants.BaseConstants.c_vac / ref_ix_f(wl)
 
 
-rng = np.random.RandomState(31338)
-oms_per_line = 20
-dist_z = 50  # m
 dark_noise_rate = 16 * 1e4 * 1e-9  # 1/ns
 
 pmts_per_module = 16
@@ -58,11 +56,32 @@ pmt_cath_area_r = 75e-3 / 2  # m
 module_radius = 0.21  # m
 
 # Calculate the relative area covered by PMTs
-efficiency = (
-    pmts_per_module * (pmt_cath_area_r) ** 2 * np.pi / (4 * np.pi * module_radius**2)
-)
+efficiency = pmts_per_module * (pmt_cath_area_r) ** 2 * np.pi / (
+            4 * np.pi * module_radius ** 2)
+
+detector_configuration = DetectorConfiguration.parse_obj({
+    "string": {
+        "module_number": 20,
+        "module_distance": 50
+    },
+    "pmt": {
+        "efficiency": efficiency,
+        "noise_rate": dark_noise_rate,
+        "area": pmt_cath_area_r
+    },
+    "module": {
+        "radius": module_radius
+    },
+    "geometry": {
+        "type": "triangular",
+        "side_length": 100,
+    },
+    "seed": 31338
+})
+
+detector_service = DetectorBuilder()
+det = detector_service.get(configuration=config)
 # det = Detector(make_line(0, 0, 20, 50, rng, dark_noise_rate, 0, efficiency=efficiency))
-det = make_triang(100, 20, dist_z, dark_noise_rate, rng, efficiency)
 
 gen_ph = make_generate_norm_flow_photons(
     args.shape_model,
@@ -73,7 +92,7 @@ gen_ph = make_generate_norm_flow_photons(
 if args.type == "cascade":
     events, records = generate_cascades(
         det,
-        cylinder_height=det._outer_cylinder[1] + 100,
+        cylinder_height=det.outer_cylinder[1] + 100,
         cylinder_radius=200,
         log_emin=2,
         log_emax=6,
@@ -89,7 +108,7 @@ if args.type == "cascade":
 elif args.type == "track":
     events, records = generate_realistic_tracks(
         det,
-        cylinder_height=det._outer_cylinder[1] + 100,
+        cylinder_height=det.outer_cylinder[1] + 100,
         cylinder_radius=200,
         log_emin=2,
         log_emax=6,
