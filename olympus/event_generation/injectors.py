@@ -9,14 +9,13 @@ from .constants import defaults
 
 class AbstractInjector(ABC):
     def __init__(
-        self,
-        detector: Detector,
-        radius_extension: Optional[float] = 50,
-        height_extension: Optional[float] = 100,
-        rng: Optional[np.random.RandomState] = defaults['rng'],
-        **kwargs,
+            self,
+            detector: Detector,
+            radius_extension: Optional[float] = 50,
+            height_extension: Optional[float] = 100,
+            rng: Optional[np.random.RandomState] = defaults['rng'],
+            **kwargs
     ) -> None:
-        super().__init__(**kwargs)
         self.detector = detector
         self.radius_extension = radius_extension
         self.height_extension = height_extension
@@ -27,14 +26,14 @@ class AbstractInjector(ABC):
 
     @abstractmethod
     def get_position(
-        self, n: Optional[int] = 1
+            self, n: Optional[int] = 1
     ) -> np.ndarray:
         pass
 
 
 class VolumeInjector(AbstractInjector):
     def get_position(
-        self, n: Optional[int] = 1
+            self, n: Optional[int] = 1
     ) -> np.ndarray:
         theta = self.rng.uniform(0, 2 * np.pi, size=n)
         r = self.cylinder_radius * np.sqrt(self.rng.uniform(0, 1, size=n))
@@ -50,7 +49,7 @@ class VolumeInjector(AbstractInjector):
 
 class SurfaceInjector(AbstractInjector):
     def get_position(
-        self, n: Optional[int] = 1
+            self, n: Optional[int] = 1
     ) -> np.ndarray:
         """Sample points on a cylinder surface.
 
@@ -62,7 +61,7 @@ class SurfaceInjector(AbstractInjector):
         radius = self.cylinder_radius
         height = self.cylinder_height
         side_area = 2 * np.pi * radius * height
-        top_area = 2 * np.pi * radius**2
+        top_area = 2 * np.pi * radius ** 2
 
         ratio = top_area / (top_area + side_area)
 

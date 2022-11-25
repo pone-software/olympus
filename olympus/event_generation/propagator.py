@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 import dataclasses
-from typing import Optional
+from typing import Optional, Any
 from jax import random
 import awkward as ak
 import copy
@@ -36,13 +36,13 @@ class AbstractPropagator(ABC):
         self.rng = rng
 
     @abstractmethod
-    def _convert(self, event_data: EventData):
+    def _convert(self, event_data: EventData, k1: Any):
         pass
 
     def propagate(self, event_data: EventData):
         key, k1, k2 = random.split(event_data.key, 3)
 
-        result = self._convert(event_data=event_data)
+        result = self._convert(event_data=event_data, k1=k1)
 
         source_pos = result[0]
         source_dir = result[1]
