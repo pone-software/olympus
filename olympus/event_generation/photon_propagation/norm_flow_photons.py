@@ -1,10 +1,14 @@
 import pickle
+from typing import List
 
 import awkward as ak
 import jax
 import jax.numpy as jnp
 from jax.lax import cond
 import numpy as np
+
+from ananke.models.detector import Detector
+from ananke.models.event import Hit, SourceRecord, SourceRecordCollection, HitCollection
 from hyperion.models.photon_arrival_time_nflow.net import (
     make_counts_net_fn,
     make_shape_conditioner_fn,
@@ -14,11 +18,12 @@ from hyperion.models.photon_arrival_time_nflow.net import (
 )
 from jax import random
 
+from .interface import AbstractPhotonPropagator
 from .utils import sources_to_model_input, sources_to_model_input_per_module, bucket_fn
 
 
 def make_generate_norm_flow_photons(
-    shape_model_path, counts_model_path, c_medium, padding_base=4
+        shape_model_path, counts_model_path, c_medium, padding_base=4
 ):
     """
     Sample photon arrival times using a normalizing flow and a counts model.
@@ -69,13 +74,13 @@ def make_generate_norm_flow_photons(
         return sample_shape_model(dist_builder, traf_params, traf_params.shape[0], key)
 
     def generate_norm_flow_photons(
-        module_coords,
-        module_efficiencies,
-        source_pos,
-        source_dir,
-        source_time,
-        source_nphotons,
-        seed=31337,
+            module_coords,
+            module_efficiencies,
+            source_pos,
+            source_dir,
+            source_time,
+            source_nphotons,
+            seed=31337,
     ):
 
         # TODO: Reimplement using padding / bucket compile (jax.mask???)
@@ -197,7 +202,6 @@ class NormFlowPhotonLHPerModule(object):
         return self._counts_net_fn.apply(self._counts_params, x)
 
     def expected_photons(self, module_efficiency, net_inp_params, source_photons):
-
         ph_frac = jnp.power(10, self._eval_counts_net(net_inp_params)).reshape(
             source_photons.shape[0]
         )
@@ -213,15 +217,14 @@ class NormFlowPhotonLHPerModule(object):
         return module_noise_rate * self._noise_window_len
 
     def expected_photons_for_sources(
-        self,
-        module_coords,
-        module_efficiency,
-        source_pos,
-        source_dir,
-        source_time,
-        source_photons,
+            self,
+            module_coords,
+            module_efficiency,
+            source_pos,
+            source_dir,
+            source_time,
+            source_photons,
     ):
-
         inp_pars, _ = sources_to_model_input_per_module(
             module_coords,
             source_pos,
@@ -232,9 +235,8 @@ class NormFlowPhotonLHPerModule(object):
         return self.expected_photons(module_efficiency, inp_pars, source_photons)
 
     def per_module_shape_llh(
-        self, t_res, net_inp_pars, src_photons_pred, noise_photons_pred
+            self, t_res, net_inp_pars, src_photons_pred, noise_photons_pred
     ):
-
         n_photons_pred = src_photons_pred + noise_photons_pred
 
         source_weight = n_photons_pred / jnp.sum(n_photons_pred)
@@ -263,13 +265,12 @@ class NormFlowPhotonLHPerModule(object):
         return shape_llh
 
     def per_module_shape_lh_with_noise(
-        self,
-        t_res,
-        net_inp_params,
-        src_photons_pred,
-        noise_photons_pred,
+            self,
+            t_res,
+            net_inp_params,
+            src_photons_pred,
+            noise_photons_pred,
     ):
-
         shape_lh = self.per_module_shape_llh(
             t_res, net_inp_params, src_photons_pred, noise_photons_pred
         )
@@ -287,14 +288,14 @@ class NormFlowPhotonLHPerModule(object):
         return total_shape_lh
 
     def per_module_shape_lh_with_noise_for_sources(
-        self,
-        times,
-        module_coords,
-        source_pos,
-        source_dir,
-        source_time,
-        src_photons_pred,
-        noise_photons_pred,
+            self,
+            times,
+            module_coords,
+            source_pos,
+            source_dir,
+            source_time,
+            src_photons_pred,
+            noise_photons_pred,
     ):
         net_inp_params, t_geo = sources_to_model_input_per_module(
             module_coords,
@@ -315,12 +316,12 @@ class NormFlowPhotonLHPerModule(object):
         return -predicted + measured * jnp.log(predicted)
 
     def per_module_poisson_llh(
-        self,
-        module_noise_rate,
-        module_efficiency,
-        n_measured,
-        source_photons,
-        net_inp_pars,
+            self,
+            module_noise_rate,
+            module_efficiency,
+            n_measured,
+            source_photons,
+            net_inp_pars,
     ):
         n_ph_pred_per_mod = self.expected_photons(
             module_efficiency, net_inp_pars, source_photons
@@ -331,17 +332,16 @@ class NormFlowPhotonLHPerModule(object):
         return self.poisson_llh(n_ph_pred_per_mod + n_p_pred_noise, n_measured)
 
     def per_module_poisson_llh_for_sources(
-        self,
-        n_measured,
-        module_coords,
-        module_noise_rate,
-        module_efficiency,
-        source_pos,
-        source_dir,
-        source_time,
-        source_photons,
+            self,
+            n_measured,
+            module_coords,
+            module_noise_rate,
+            module_efficiency,
+            source_pos,
+            source_dir,
+            source_time,
+            source_photons,
     ):
-
         net_inp_pars, _ = sources_to_model_input_per_module(
             module_coords,
             source_pos,
@@ -359,16 +359,16 @@ class NormFlowPhotonLHPerModule(object):
         )
 
     def per_module_full_llh(
-        self,
-        times,
-        counts,
-        source_pos,
-        source_dir,
-        source_time,
-        source_photons,
-        module_coords,
-        module_noise_rate,
-        module_efficiency,
+            self,
+            times,
+            counts,
+            source_pos,
+            source_dir,
+            source_time,
+            source_photons,
+            module_coords,
+            module_noise_rate,
+            module_efficiency,
     ):
         net_inp_pars, t_geo = sources_to_model_input_per_module(
             module_coords,
@@ -399,18 +399,17 @@ class NormFlowPhotonLHPerModule(object):
         return shape.sum() + poisson
 
     def per_module_tfirst_llh(
-        self,
-        time,
-        counts,
-        source_pos,
-        source_dir,
-        source_time,
-        source_photons,
-        module_coords,
-        module_noise_rate,
-        module_efficiency,
+            self,
+            time,
+            counts,
+            source_pos,
+            source_dir,
+            source_time,
+            source_photons,
+            module_coords,
+            module_noise_rate,
+            module_efficiency,
     ):
-
         net_inp_pars, t_geo = sources_to_model_input_per_module(
             module_coords,
             source_pos,
@@ -442,21 +441,21 @@ class NormFlowPhotonLHPerModule(object):
         cumul = jnp.trapz(jnp.exp(shape_llh), x=tvanilla)
 
         llh = (
-            jnp.log(counts)
-            + self.per_module_shape_lh_with_noise(
-                (jnp.atleast_1d(tfirst) - t_geo),
-                net_inp_pars,
-                src_photons_pred,
-                noise_photons_pred,
-            )
-            + jnp.log(1 - cumul) * (counts - 1)
+                jnp.log(counts)
+                + self.per_module_shape_lh_with_noise(
+            (jnp.atleast_1d(tfirst) - t_geo),
+            net_inp_pars,
+            src_photons_pred,
+            noise_photons_pred,
+        )
+                + jnp.log(1 - cumul) * (counts - 1)
         )
 
         return llh, poisson_llh
 
 
 def make_nflow_photon_likelihood_per_module(
-    shape_model_path, counts_model_path, mode="full", noise_window_len=5000
+        shape_model_path, counts_model_path, mode="full", noise_window_len=5000
 ):
     shape_config, shape_params = pickle.load(open(shape_model_path, "rb"))
     counts_config, counts_params = pickle.load(open(counts_model_path, "rb"))
@@ -511,16 +510,16 @@ def make_nflow_photon_likelihood_per_module(
         return shape_lh
 
     def eval_per_module_likelihood(
-        time,
-        n_measured,
-        module_coords,
-        module_efficiencies,
-        source_pos,
-        source_dir,
-        source_time,
-        source_photons,
-        c_medium,
-        noise_rate,
+            time,
+            n_measured,
+            module_coords,
+            module_efficiencies,
+            source_pos,
+            source_dir,
+            source_time,
+            source_photons,
+            c_medium,
+            noise_rate,
     ):
 
         inp_pars, time_geo = sources_to_model_input_per_module(
@@ -540,8 +539,8 @@ def make_nflow_photon_likelihood_per_module(
         noise_photons = noise_rate * noise_window_len
 
         n_photons = (
-            jnp.reshape(ph_frac * source_photons.squeeze(), (source_pos.shape[0],))
-            * module_efficiencies
+                jnp.reshape(ph_frac * source_photons.squeeze(), (source_pos.shape[0],))
+                * module_efficiencies
         )
 
         n_ph_pred_per_mod = jnp.sum(n_photons)
@@ -584,9 +583,9 @@ def make_nflow_photon_likelihood_per_module(
             cumul = jnp.trapz(jnp.exp(total_shape_lh(tsamples)), x=tvanilla)
 
             llh = (
-                jnp.log(n_measured)
-                + total_shape_lh(tfirst - time_geo)
-                + jnp.log(1 - cumul) * n_measured
+                    jnp.log(n_measured)
+                    + total_shape_lh(tfirst - time_geo)
+                    + jnp.log(1 - cumul) * n_measured
             )
 
             return llh.sum(), counts_lh, n_ph_pred_per_mod_total
@@ -627,13 +626,13 @@ def make_nflow_photon_likelihood(shape_model_path, counts_model_path):
         return eval_log_prob(dist_builder, traf_params, samples)
 
     def eval_likelihood(
-        event,
-        module_coords,
-        source_pos,
-        source_dir,
-        source_time,
-        source_photons,
-        c_medium,
+            event,
+            module_coords,
+            source_pos,
+            source_dir,
+            source_time,
+            source_photons,
+            c_medium,
     ):
         inp_pars, time_geo = sources_to_model_input(
             module_coords,
@@ -704,3 +703,98 @@ def make_nflow_photon_likelihood(shape_model_path, counts_model_path):
         return lhsum
 
     return eval_likelihood
+
+
+class NormalFlowPhotonPropagator(AbstractPhotonPropagator):
+    """Photon propagator based on the normal flow method."""
+
+    def __init__(
+            self,
+            detector: Detector,
+            shape_model_path: str,
+            counts_model_path: str,
+            c_medium: float,
+            padding_base: int = 4
+    ):
+        """
+        Sample photon arrival times using a normalizing flow and a counts model.
+
+        Args:
+            shape_model_path: path of the shape model
+            counts_model_path: path of the counts model
+            c_medium:
+                Speed of light in medium (ns). Used to calculate
+                the direct propagation time between source and module.
+                Make sure it matches the value used in generating the PDF.
+            padding_base:
+                Logarithmic base used to calculate bucket size when compiling the
+                sampling function. bucket_size = padding_base**N
+
+        """
+        super(NormalFlowPhotonPropagator, self).__init__(detector=detector)
+        self.detector_df = self.detector.to_pandas()
+        self.module_coords = np.array(
+            self.detector_df[[
+                'module_x',
+                'module_y',
+                'module_z',
+            ]]
+        )
+        self.module_efficiencies = np.array(
+            self.detector_df[[
+                'pmt_efficiency',
+            ]]
+        )
+
+        self.generate_norm_flow_photons = make_generate_norm_flow_photons(
+            shape_model_path,
+            counts_model_path,
+            c_medium,
+            padding_base
+        )
+
+    def propagate(
+            self, sources: SourceRecordCollection,
+            seed: int = 1337
+    ) -> HitCollection:
+        """Propagates using the normal flow propagator.
+
+        Args:
+            sources: Photon source to propagate
+            seed: seed by which to propagate
+
+        Returns:
+            List of hits containing propagation result
+        """
+        source_df = sources.to_pandas()
+
+        if len(source_df):
+
+            hits = self.generate_norm_flow_photons(
+                self.module_coords,
+                self.module_efficiencies,
+                np.array(source_df[['location_x', 'location_y', 'location_z']]),
+                np.array(
+                    source_df[['orientation_x', 'orientation_y', 'orientation_z']]
+                    ),
+                np.array(source_df[['time']]),
+                np.array(source_df[['number_of_photons']]),
+                seed
+            )
+        else:
+            hits = []
+
+        hit_collection = HitCollection()
+
+        for index, module in enumerate(hits):
+            for hit in module:
+                hit_collection.append(
+                    Hit(
+                        pmt_id=self.detector_df.loc[index, "pmt_id"],
+                        module_id=self.detector_df.loc[index, "module_id"],
+                        string_id=self.detector_df.loc[index, "string_id"],
+                        time=hit
+                    )
+                )
+
+        return hit_collection

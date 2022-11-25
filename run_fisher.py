@@ -2,6 +2,7 @@ import os
 import argparse
 import pickle
 
+from ananke.schemas.detector import DetectorConfiguration
 from olympus.event_generation.utils import sph_to_cart_jnp
 
 os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.8"
@@ -9,11 +10,6 @@ import functools
 
 import numpy as np
 import jax.numpy as jnp
-from olympus.event_generation.detector import (
-    make_triang,
-    make_hex_grid,
-    Detector,
-)
 from olympus.event_generation.lightyield import (
     make_realistic_cascade_source,
 )
@@ -33,7 +29,7 @@ from hyperion.medium import cascadia_ref_index_func
 from olympus.event_generation.detector import (
     sample_cylinder_surface,
     sample_cylinder_volume,
-    sample_direction,
+    sample_direction, DetectorBuilder,
 )
 
 parser = argparse.ArgumentParser()
@@ -91,30 +87,50 @@ pmt_cath_area_r = 75e-3 / 2  # m
 module_radius = 0.21  # m
 
 # Calculate the relative area covered by PMTs
-efficiency = (
-    pmts_per_module * (pmt_cath_area_r) ** 2 * np.pi / (4 * np.pi * module_radius**2)
-)
+efficiency = pmts_per_module * (pmt_cath_area_r) ** 2 * np.pi / (
+        4 * np.pi * module_radius ** 2)
 
+detector_builder = DetectorBuilder()
+detector_configuration_dict = {
+    "string": {
+        "module_number": 20,
+        "module_distance": 50
+    },
+    "pmt": {
+        "efficiency": efficiency,
+        "noise_rate": dark_noise_rate,
+        "area": pmt_cath_area_r
+    },
+    "module": {
+        "radius": module_radius
+    },
+    "geometry": {
+        "type": "triangular",
+        "side_length": 100,
+    },
+    "seed": 31338
+}
 rng = np.random.RandomState(args.seed)
 if args.det == "triangle":
-    det = make_triang(args.spacing, 20, 50, dark_noise_rate, rng, efficiency=efficiency)
+    detector_configuration_dict["geometry"] = {
+        "type": "triangular",
+        "side_length": args.spacing,
+    }
+    detector_configuration = \
+        DetectorConfiguration.parse_obj(detector_configuration_dict)
+    det = detector_builder.get(configuration=detector_configuration)
 elif args.det == "cluster":
-    det = Detector(
-        make_hex_grid(
-            3,
-            args.spacing,
-            20,
-            50,
-            dark_noise_rate,
-            rng,
-            efficiency=efficiency,
-            truncate=1,
-        )
-    )
+    detector_configuration_dict["geometry"] = {
+        "type": "hexagonal",
+        "number_of_strings_per_side": 3,
+        "distance_between_strings": args.spacing,
+    }
+    detector_configuration = \
+        DetectorConfiguration.parse_obj(detector_configuration_dict)
+    det = detector_builder.get(configuration=detector_configuration)
 else:
     raise NotImplementedError()
 radius, height = det.outer_cylinder
-
 
 res_dicts = []
 for _ in range(args.nev):
@@ -188,7 +204,7 @@ for _ in range(args.nev):
             "particle_id": 11,
         }
         event_data["dir"] = sph_to_cart_jnp(event_data["theta"], event_data["phi"])
-        # print(event_data)
+        # print(event_record)
         call_func = calc_fisher_info_double_cascades
 
     converter = functools.partial(

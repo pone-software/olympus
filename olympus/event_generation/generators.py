@@ -1,15 +1,17 @@
 from abc import ABC, abstractmethod
 from typing import Optional, Tuple, Type, List
-from jax import random
 import numpy as np
 import awkward as ak
 from tqdm.auto import trange
 
+from ananke.models.event import EventRecord, EventType, EventCollection
+from ananke.models.geometry import Vector3D
 from .injectors import (
     AbstractInjector,
     SurfaceInjector,
     VolumeInjector,
 )
+from .photon_propagation.interface import AbstractPhotonPropagator
 from .propagator import (
     AbstractPropagator,
     CascadePropagator,
@@ -19,7 +21,6 @@ from .propagator import (
 from .spectra import AbstractSpectrum, UniformSpectrum
 
 from .mc_record import MCRecord
-from .data import EventData
 from .detector import Detector, sample_direction, generate_noise
 from .constants import defaults
 from .utils import get_event_times_by_rate
@@ -40,22 +41,20 @@ class AbstractGenerator(ABC):
         self.seed = seed
         self.rng = rng
 
-    def get_key(self) -> str:
-        """Generate realistic muon tracks."""
-        key, subkey = random.split(random.PRNGKey(self.seed))
-
-        return key
-
     @abstractmethod
-    def generate(self, start_time=0, end_time=None, **kwargs) -> Tuple[List, List]:
+    def generate(self, start_time=0, end_time=None, **kwargs) -> EventCollection:
         pass
 
     def generate_per_timeframe(
             self, start_time: int, end_time: int, rate: Optional[float] = None
-    ) -> Tuple[List, List]:
+    ) -> EventCollection:
         return self.generate(start_time=start_time, end_time=end_time, rate=rate)
 
-    def generate_nsamples(self, nsamples: int, start_time: Optional[int] = 0) -> Tuple[List, List]:
+    def generate_nsamples(
+            self,
+            nsamples: int,
+            start_time: Optional[int] = 0
+            ) -> EventCollection:
         return self.generate(nsamples=nsamples, start_time=start_time)
 
 
@@ -65,6 +64,7 @@ class EventGenerator(AbstractGenerator):
             injector: AbstractInjector,
             spectrum: AbstractSpectrum,
             propagator: AbstractPropagator,
+            event_type: EventType,
             rate: Optional[float] = None,
             particle_id: Optional[int] = None,
             *args,
@@ -75,6 +75,7 @@ class EventGenerator(AbstractGenerator):
         self.spectrum = spectrum
         self.propagator = propagator
         self.rate = rate
+        self.event_type = event_type
         self.particle_id = particle_id
 
     def generate(
@@ -82,10 +83,8 @@ class EventGenerator(AbstractGenerator):
             n_samples: Optional[int] = None,
             start_time: Optional[int] = 0,
             end_time: Optional[int] = None,
-    ) -> Tuple[List, List]:
-
+    ) -> EventCollection:
         """Generate realistic muon tracks."""
-        key = self.get_key()
 
         if n_samples is None and (self.rate is None or end_time is None):
             raise ValueError("Either number of samples or time parameters must be set")
@@ -103,8 +102,7 @@ class EventGenerator(AbstractGenerator):
         track_length = 3000
         iterator_range = trange(n_samples)
 
-        events = []
-        records = []
+        events = EventCollection
 
         positions = self.injector.get_position(n=n_samples)
         energies = self.spectrum.get_energy(n=n_samples)
@@ -115,23 +113,22 @@ class EventGenerator(AbstractGenerator):
             if time_based:
                 start_time = start_times[i]
 
-            event_data = EventData(
-                start_position=positions[i],
+            event_data = EventRecord(
+                type=self.event_type,
+                location=Vector3D.from_numpy(positions[i]),
                 energy=energies[i],
-                direction=directions[i],
+                orientation=Vector3D.from_numpy(directions[i]),
                 length=track_length,
-                key=key,
                 time=start_time,
                 particle_id=self.particle_id,
             )
 
-            event, record = self.propagator.propagate(event_data=event_data)
+            event = self.propagator.propagate(event_record=event_data)
 
-            if len(event) > 0:
+            if len(event.hits) > 0:
                 events.append(event)
-                records.append(record)
 
-        return events, records
+        return events
 
 
 class CascadeEventGenerator(EventGenerator):
@@ -150,7 +147,10 @@ class CascadeEventGenerator(EventGenerator):
         propagator = CascadePropagator(
             detector=detector, photon_propagator=photon_propagator, **kwargs
         )
-        super().__init__(injector, spectrum, propagator, *args, **kwargs)
+        super().__init__(
+            event_type=EventType.CASCADE,
+            injector=injector, spectrum=spectrum, propagator=propagator, *args, **kwargs
+        )
 
 
 class TrackEventGenerator(EventGenerator):
@@ -167,7 +167,10 @@ class TrackEventGenerator(EventGenerator):
         propagator = TrackPropagator(
             detector=detector, photon_propagator=photon_propagator, **kwargs
         )
-        super().__init__(injector, spectrum, propagator, *args, **kwargs)
+        super().__init__(
+            event_type=EventType.REALISTIC_TRACK,
+            injector=injector, spectrum=spectrum, propagator=propagator, *args, **kwargs
+        )
 
 
 class StartingTrackEventGenerator(EventGenerator):
@@ -184,7 +187,10 @@ class StartingTrackEventGenerator(EventGenerator):
         propagator = StartingTrackPropagator(
             detector=detector, photon_propagator=photon_propagator, **kwargs
         )
-        super().__init__(injector, spectrum, propagator, *args, **kwargs)
+        super().__init__(
+            event_type=EventType.STARTING_TRACK,
+            injector=injector, spectrum=spectrum, propagator=propagator, *args, **kwargs
+        )
 
 
 class RandomNoiseGenerator(AbstractGenerator):
@@ -199,17 +205,22 @@ class RandomNoiseGenerator(AbstractGenerator):
 
     def generate(self, start_time=0, end_time=None, **kwargs) -> Tuple[List, List]:
         time_range = [start_time, end_time]
-        return [generate_noise(self.detector, time_range, self.rng)], [MCRecord('noise', [], EventData(
-            key=self.get_key(),
-            direction=np.zeros((3,)),
-            energy=0.0,
-            start_position=np.zeros((3,)),
-            time=0
-        ))]
+        return [generate_noise(self.detector, time_range, self.rng)], [MCRecord(
+            'noise', [], EventRecord(
+                orientation=Vector3D(x=0, y=0, z=0),
+                energy=0.0,
+                location=Vector3D(x=0, y=0, z=0),
+                time=0
+            )
+        )]
 
 
 class GeneratorFactory:
-    def __init__(self, detector: Detector, photon_propagator: callable = None) -> None:
+    def __init__(
+            self,
+            detector: Detector,
+            photon_propagator: AbstractPhotonPropagator = None
+    ) -> None:
         self._builders = {
             "track": TrackEventGenerator,
             "starting_track": StartingTrackEventGenerator,
@@ -239,19 +250,16 @@ class GeneratorCollection:
     def add_generator(self, generator: AbstractGenerator):
         self.generators.append(generator)
 
-    def generate(self, **kwargs) -> Tuple[List, List]:
-        events = []
-        records = []
+    def generate(self, **kwargs) -> EventCollection:
+        event_collection = EventCollection()
 
         for generator in self.generators:
-            generator_events, generator_records = generator.generate(**kwargs)
-            events += generator_events
-            records += generator_records
+            event_collection += generator.generate(**kwargs)
 
-        return events, records
+        return event_collection
 
-    def generate_per_timeframe(self, start_time: int, end_time: int) -> Tuple[List, List]:
+    def generate_per_timeframe(self, start_time: int, end_time: int) -> EventCollection:
         return self.generate(start_time=start_time, end_time=end_time)
 
-    def generate_nsamples(self, nsamples: int) -> Tuple[List, List]:
+    def generate_nsamples(self, nsamples: int) -> EventCollection:
         return self.generate(nsamples=nsamples)

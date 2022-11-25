@@ -16,7 +16,6 @@ class AbstractInjector(ABC):
         rng: Optional[np.random.RandomState] = defaults['rng'],
         **kwargs,
     ) -> None:
-        super().__init__(**kwargs)
         self.detector = detector
         self.radius_extension = radius_extension
         self.height_extension = height_extension

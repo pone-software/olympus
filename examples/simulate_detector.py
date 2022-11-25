@@ -2,22 +2,20 @@ import json
 import os
 import pickle
 
-import matplotlib.pyplot as plt
 import numpy as np
-from jax import numpy as jnp
 
+from ananke.schemas.detector import DetectorConfiguration
 from hyperion.constants import Constants
 from hyperion.medium import medium_collections
 from olympus.event_generation.detector import (
-    make_triang,
+    DetectorBuilder
 )
 from olympus.event_generation.generators import GeneratorCollection, GeneratorFactory
 from olympus.event_generation.photon_propagation.norm_flow_photons import (
-    make_generate_norm_flow_photons,
+    NormalFlowPhotonPropagator,
 )
 
 os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.5"
-
 
 path_to_config = "../../hyperion/data/pone_config_optimistic.json"
 config = json.load(open(path_to_config))["photon_propagation"]
@@ -40,24 +38,42 @@ module_radius = 0.21  # m
 
 # Calculate the relative area covered by PMTs
 efficiency = (
-        pmts_per_module * pmt_cath_area_r ** 2 * np.pi / (4 * np.pi * module_radius ** 2)
+        pmts_per_module * pmt_cath_area_r ** 2 * np.pi / (
+            4 * np.pi * module_radius ** 2)
 )
-det = make_triang(
-    side_len, oms_per_line, dist_z, dark_noise_rate, rng, efficiency=efficiency
+detector_configuration = DetectorConfiguration.parse_obj(
+    {
+        "string": {
+            "module_number": 20,
+            "module_distance": 50
+        },
+        "pmt": {
+            "efficiency": efficiency,
+            "noise_rate": dark_noise_rate,
+            "area": pmt_cath_area_r
+        },
+        "module": {
+            "radius": module_radius
+        },
+        "geometry": {
+            "type": "triangular",
+            "side_length": 100,
+        },
+        "seed": 31338
+    }
 )
-module_positions = jnp.asarray(det.module_coords)
 
-plt.scatter(module_positions[:, 0], module_positions[:, 1])
-plt.xlabel("x [m]")
-plt.ylabel("y [m]")
+detector_service = DetectorBuilder()
+det = detector_service.get(configuration=detector_configuration)
 
-gen_ph = make_generate_norm_flow_photons(
-    "../../hyperion/data/photon_arrival_time_nflow_params.pickle",
-    "../../hyperion/data/photon_arrival_time_counts_params.pickle",
-    c_medium=c_medium_f(700) / 1e9,
+photon_propagator = NormalFlowPhotonPropagator(
+    detector=det,
+    shape_model_path="../../hyperion/data/photon_arrival_time_nflow_params.pickle",
+    counts_model_path="../../hyperion/data/photon_arrival_time_counts_params.pickle",
+    c_medium=c_medium_f(700) / 1e9
 )
 
-generator_factory = GeneratorFactory(det, gen_ph)
+generator_factory = GeneratorFactory(det, photon_propagator)
 
 cascades_generator = generator_factory.create(
     "cascade", particle_id=11, log_minimal_energy=2, log_maximal_energy=5.5, rate=0.05
@@ -88,6 +104,4 @@ event_collection = generator_collection.generate(
     end_time=100,
 )
 
-
 pickle.dump(event_collection, open('./dataset/test', "wb"))
-
