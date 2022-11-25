@@ -102,7 +102,7 @@ class EventGenerator(AbstractGenerator):
         track_length = 3000
         iterator_range = trange(n_samples)
 
-        events = EventCollection
+        events = EventCollection()
 
         positions = self.injector.get_position(n=n_samples)
         energies = self.spectrum.get_energy(n=n_samples)

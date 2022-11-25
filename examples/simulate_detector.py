@@ -83,7 +83,7 @@ cascades_generator2 = generator_factory.create(
     "cascade", particle_id=11, log_minimal_energy=4, log_maximal_energy=5.5, rate=0.01
 )
 
-noise_generator = generator_factory.create("noise")
+# noise_generator = generator_factory.create("noise")
 
 track_generator = generator_factory.create(
     'track',
@@ -97,11 +97,13 @@ generator_collection = GeneratorCollection(detector=det)
 # generator_collection.add_generator(track_generator)
 generator_collection.add_generator(cascades_generator)
 generator_collection.add_generator(cascades_generator2)
-generator_collection.add_generator(noise_generator)
+# generator_collection.add_generator(noise_generator)
 
 event_collection = generator_collection.generate(
     start_time=0,
     end_time=100,
 )
 
-pickle.dump(event_collection, open('./dataset/test', "wb"))
+print(event_collection.to_pandas())
+
+#pickle.dump(event_collection, open('./dataset/test', "wb"))

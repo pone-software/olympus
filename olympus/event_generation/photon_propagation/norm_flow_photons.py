@@ -762,8 +762,8 @@ class NormalFlowPhotonPropagator(AbstractPhotonPropagator):
                 self.detector_df['pmt_efficiency'].to_numpy(dtype=np.float32),
                 source_df[['location_x', 'location_y', 'location_z']].to_numpy(dtype=np.float32),
                 source_df[['orientation_x', 'orientation_y', 'orientation_z']].to_numpy(dtype=np.float32),
-                source_df['time'].to_numpy(dtype=np.float32),
-                source_df['number_of_photons'].to_numpy(dtype=np.float32),
+                np.expand_dims(source_df['time'].to_numpy(dtype=np.float32), axis=1),
+                np.expand_dims(source_df['number_of_photons'].to_numpy(dtype=np.float32), axis=1),
                 seed
             )
         else:
