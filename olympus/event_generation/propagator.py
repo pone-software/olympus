@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 import dataclasses
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Any
 
 import pandas as pd
 from jax import random
