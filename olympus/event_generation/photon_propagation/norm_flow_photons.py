@@ -733,18 +733,6 @@ class NormalFlowPhotonPropagator(AbstractPhotonPropagator):
         """
         super(NormalFlowPhotonPropagator, self).__init__(detector=detector)
         self.detector_df = self.detector.to_pandas()
-        self.module_coords = np.array(
-            self.detector_df[[
-                'module_x',
-                'module_y',
-                'module_z',
-            ]]
-        )
-        self.module_efficiencies = np.array(
-            self.detector_df[[
-                'pmt_efficiency',
-            ]]
-        )
 
         self.generate_norm_flow_photons = make_generate_norm_flow_photons(
             shape_model_path,
@@ -769,16 +757,13 @@ class NormalFlowPhotonPropagator(AbstractPhotonPropagator):
         source_df = sources.to_pandas()
 
         if len(source_df):
-
             hits = self.generate_norm_flow_photons(
-                self.module_coords,
-                self.module_efficiencies,
-                np.array(source_df[['location_x', 'location_y', 'location_z']]),
-                np.array(
-                    source_df[['orientation_x', 'orientation_y', 'orientation_z']]
-                    ),
-                np.array(source_df[['time']]),
-                np.array(source_df[['number_of_photons']]),
+                self.detector_df[['module_x', 'module_y', 'module_z', ]].to_numpy(dtype=np.float32),
+                self.detector_df['pmt_efficiency'].to_numpy(dtype=np.float32),
+                source_df[['location_x', 'location_y', 'location_z']].to_numpy(dtype=np.float32),
+                source_df[['orientation_x', 'orientation_y', 'orientation_z']].to_numpy(dtype=np.float32),
+                source_df['time'].to_numpy(dtype=np.float32),
+                source_df['number_of_photons'].to_numpy(dtype=np.float32),
                 seed
             )
         else:
