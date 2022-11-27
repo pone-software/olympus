@@ -100,7 +100,8 @@ class AbstractPropagator(ABC):
             sources=sources
         )
 
-        event.hits = self.photon_propagator.propagate(sources)
+        if len(sources):
+            event.hits = self.photon_propagator.propagate(sources)
 
         return event
 

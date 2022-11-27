@@ -731,8 +731,7 @@ class NormalFlowPhotonPropagator(AbstractPhotonPropagator):
                 sampling function. bucket_size = padding_base**N
 
         """
-        super(NormalFlowPhotonPropagator, self).__init__(detector=detector)
-        self.detector_df = self.detector.to_pandas()
+        super().__init__(detector=detector)
 
         self.generate_norm_flow_photons = make_generate_norm_flow_photons(
             shape_model_path,

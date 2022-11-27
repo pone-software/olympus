@@ -11,6 +11,7 @@ from olympus.event_generation.detector import (
     DetectorBuilder
 )
 from olympus.event_generation.generators import GeneratorCollection, GeneratorFactory
+from olympus.event_generation.photon_propagation.mock_photons import MockPhotonPropagator
 from olympus.event_generation.photon_propagation.norm_flow_photons import (
     NormalFlowPhotonPropagator,
 )
@@ -66,10 +67,14 @@ detector_configuration = DetectorConfiguration.parse_obj(
 detector_service = DetectorBuilder()
 det = detector_service.get(configuration=detector_configuration)
 
-photon_propagator = NormalFlowPhotonPropagator(
+# photon_propagator = NormalFlowPhotonPropagator(
+#     detector=det,
+#     shape_model_path="../../hyperion/data/photon_arrival_time_nflow_params.pickle",
+#     counts_model_path="../../hyperion/data/photon_arrival_time_counts_params.pickle",
+#     c_medium=c_medium_f(700) / 1e9
+# )
+photon_propagator = MockPhotonPropagator(
     detector=det,
-    shape_model_path="../../hyperion/data/photon_arrival_time_nflow_params.pickle",
-    counts_model_path="../../hyperion/data/photon_arrival_time_counts_params.pickle",
     c_medium=c_medium_f(700) / 1e9
 )
 

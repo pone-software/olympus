@@ -11,6 +11,7 @@ class AbstractPhotonPropagator(ABC):
     def __init__(
             self,
             detector: Detector,
+            c_medium: float,
             **kwargs
     ) -> None:
         """Constructor already saving the detector.
@@ -20,6 +21,8 @@ class AbstractPhotonPropagator(ABC):
         """
         super().__init__(**kwargs)
         self.detector = detector
+        self.c_medium = c_medium
+        self.detector_df = detector.to_pandas()
 
     @abstractmethod
     def propagate(
