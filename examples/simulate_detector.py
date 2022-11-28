@@ -45,7 +45,7 @@ efficiency = (
 detector_configuration = DetectorConfiguration.parse_obj(
     {
         "string": {
-            "module_number": 20,
+            "module_number": 2,
             "module_distance": 50
         },
         "pmt": {
@@ -57,7 +57,7 @@ detector_configuration = DetectorConfiguration.parse_obj(
             "radius": module_radius
         },
         "geometry": {
-            "type": "triangular",
+            "type": "single",
             "side_length": 100,
         },
         "seed": 31338
@@ -101,12 +101,11 @@ generator_collection = GeneratorCollection(detector=det)
 
 # generator_collection.add_generator(track_generator)
 generator_collection.add_generator(cascades_generator)
-generator_collection.add_generator(cascades_generator2)
+# generator_collection.add_generator(cascades_generator2)
 # generator_collection.add_generator(noise_generator)
 
 event_collection = generator_collection.generate(
-    start_time=0,
-    end_time=100,
+    n_samples=1
 )
 
 print(event_collection.to_pandas())
