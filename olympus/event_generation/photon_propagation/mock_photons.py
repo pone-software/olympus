@@ -6,6 +6,8 @@ import jax.numpy as jnp
 
 from jax import jit
 
+import plotly.express as px
+
 from ananke.models.detector import Detector
 from ananke.models.event import SourceRecordCollection, HitCollection
 from olympus.event_generation.photon_propagation.interface import \
@@ -150,7 +152,7 @@ class MockPhotonPropagator(AbstractPhotonPropagator):
             'location_y',
             'location_z',
         ]].to_numpy(np.float32)
-        source_positions = jnp.array(source_locations)
+        source_locations = jnp.array(source_locations)
 
         source_orientations = sources_df[[
             'orientation_x',
@@ -159,6 +161,8 @@ class MockPhotonPropagator(AbstractPhotonPropagator):
         ]].to_numpy(np.float32)
         source_orientations = jnp.array(source_orientations)
 
+        source_angle_distributions = sources.angle_distributions
+
         hits = HitCollection()
 
         # 1. Calculate angle between PMT and Source direction
@@ -166,8 +170,8 @@ class MockPhotonPropagator(AbstractPhotonPropagator):
             jnp.expand_dims(self.pmt_positions, axis=1),
             (1, len(sources_df.index), 1)
         )
-        pmt_to_source = source_positions - expanded_pmt_positions
-        pmt_to_source_distances = np.linalg.norm(pmt_to_source, axis=2)
+        pmt_to_source = source_locations - expanded_pmt_positions
+        pmt_to_source_distances = jnp.linalg.norm(pmt_to_source, axis=2)
         pmt_to_source_angles = self.__calculate_pmt_to_source_angles(pmt_to_source)
         source_orientation_angles = self.__calculate_source_orientation_angles(
             - pmt_to_source, # we want to know angle between source and the pmt.
@@ -175,10 +179,9 @@ class MockPhotonPropagator(AbstractPhotonPropagator):
             )
 
         # 2. Mask sources in direction of PMT (180°)
-        # mask_condition = pmt_to_source_angles < np.pi / 2
-        # pmt_to_source_angles = np.where(mask_condition, pmt_to_source_angles, 0)
+        mask_condition = pmt_to_source_angles < np.pi / 2
+        pmt_to_source_angles = np.where(mask_condition, pmt_to_source_angles, 0)
         # source_orientation_angles = np.where(mask_condition, source_orientation_angles, 0)
-
         # 3. Calculate Yield based on distance
 
 

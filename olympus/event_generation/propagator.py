@@ -11,7 +11,7 @@ import uuid
 import numpy as np
 import numpy.typing as npt
 
-from ananke.models.event import EventRecord, Event, SourceRecord, SourceRecordCollection
+from ananke.models.event import EventRecord, Event, SourceRecordCollection, SourceRecord
 from ananke.models.geometry import Vector3D
 from .constants import defaults
 from .lightyield import make_realistic_cascade_source
@@ -46,16 +46,18 @@ class AbstractPropagator(ABC):
     def _convert_source_array_to_sources(
             self,
             sources_information: Tuple[
-                npt.NDArray[np.float64],
-                npt.NDArray[np.float64],
-                npt.NDArray[np.float64],
-                npt.NDArray[np.float64]
+                npt.ArrayLike,
+                npt.ArrayLike,
+                npt.ArrayLike,
+                npt.ArrayLike,
+                npt.ArrayLike,
             ]
     ) -> SourceRecordCollection:
         source_locations = sources_information[0]
         source_orientations = sources_information[1]
         source_times = sources_information[2]
         source_number_of_photons = sources_information[3]
+        source_angle_distribution = sources_information[4]
 
         # early mask sources that are out of reach
 
@@ -73,6 +75,7 @@ class AbstractPropagator(ABC):
         source_orientations = source_orientations[mask]
         source_times = source_times[mask]
         source_number_of_photons = source_number_of_photons[mask]
+        source_angle_distribution = source_angle_distribution[mask]
 
         source_collection = SourceRecordCollection()
 
@@ -82,7 +85,8 @@ class AbstractPropagator(ABC):
                     location=Vector3D.from_numpy(location),
                     orientation=Vector3D.from_numpy(source_orientations[index]),
                     time=source_times[index],
-                    number_of_photons=source_number_of_photons[index]
+                    number_of_photons=source_number_of_photons[index],
+                    angle_distribution=source_angle_distribution[index],
                 )
             )
 
@@ -94,7 +98,6 @@ class AbstractPropagator(ABC):
         sources, length = self._convert(event_record=event_record, k1=k1)
         event_record.length = length
         event = Event(
-            ID=uuid.uuid4().int,
             detector=self.detector,
             event_record=event_record,
             sources=sources
@@ -119,7 +122,7 @@ class TrackPropagator(AbstractPropagator):
         self.proposal_propagator = proposal_setup()
 
     def _convert(self, event_record: EventRecord, k1: str) -> Tuple[
-        pd.DataFrame, Optional[float]]:
+        SourceRecordCollection, Optional[float]]:
         sources = generate_muon_energy_losses(
             self.proposal_propagator,
             event_record.energy,
@@ -128,11 +131,11 @@ class TrackPropagator(AbstractPropagator):
             np.array(event_record.orientation),
             event_record.time,
             k1,
+            return_angle_distribution=True
         )
-        return pd.DataFrame(
-            data=sources[:4],
-            columns=['location', 'orientation', 'time', 'number_of_photons']
-        ), sources[4]
+
+        source_collection = self._convert_source_array_to_sources(sources[:-1])
+        return source_collection, sources[-1]
 
 
 class CascadePropagator(AbstractPropagator):
@@ -154,8 +157,7 @@ class CascadePropagator(AbstractPropagator):
         )
         self.resolution = resolution
 
-    def _convert(self, event_record: EventRecord, k1: str) -> Tuple[
-        SourceRecordCollection, Optional[float]]:
+    def _convert(self, event_record: EventRecord, k1: str) -> Tuple[SourceRecordCollection, Optional[float]]:
         sources = make_realistic_cascade_source(
             np.array(event_record.location),
             event_record.time,
@@ -165,6 +167,7 @@ class CascadePropagator(AbstractPropagator):
             key=k1,
             moliere_rand=True,
             resolution=self.resolution,
+            return_angle_distribution=True
         )
 
         source_collection = self._convert_source_array_to_sources(sources)
@@ -191,7 +194,7 @@ class StartingTrackPropagator(TrackPropagator, CascadePropagator):
         )
         self.rng = np.random.default_rng(seed)
 
-    def propagate(self, event_record: EventRecord):
+    def propagate(self, event_record: EventRecord) -> Event:
         inelas = self.rng.uniform(1e-6, 1 - 1e-6)
         track_event_record = dataclasses.replace(
             event_record, energy=inelas * event_record.energy
@@ -200,25 +203,14 @@ class StartingTrackPropagator(TrackPropagator, CascadePropagator):
             event_record, energy=(1 - inelas) * event_record.energy
         )
 
-        track, track_record = super(TrackPropagator, self).propagate(track_event_record)
-        cascade, cascade_record = super(CascadePropagator, self).propagate(
+        track_event = super(TrackPropagator, self).propagate(track_event_record)
+        cascade_event = super(CascadePropagator, self).propagate(
             cascade_event_record
         )
 
-        raw_energy = event_record.energy
-        track_event_record = copy.copy(event_record)
-
-        track_event_record.energy = inelas * raw_energy
-
-        if (ak.count(track) == 0) & (ak.count(cascade) == 0):
-            event = ak.Array([])
-
-        elif ak.count(track) == 0:
-            event = cascade
-        elif (ak.count(cascade)) == 0:
-            event = track
-        else:
-            event = ak.sort(ak.concatenate([track, cascade], axis=1))
-        record = track_record + cascade_record
-
-        return event, record
+        return Event(
+            detector=self.detector,
+            sources=track_event.sources + cascade_event.sources,
+            hits=track_event.hits + cascade_event.hits,
+            event_record=event_record,
+        )

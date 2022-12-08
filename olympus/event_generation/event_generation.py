@@ -1,7 +1,7 @@
 """Event Generators."""
 import functools
 import logging
-from typing import Callable, Optional, List
+from typing import Callable, Optional, List, Tuple
 
 import awkward as ak
 import numpy as np
@@ -21,14 +21,12 @@ from .lightyield import make_pointlike_cascade_source, make_realistic_cascade_so
 from .mc_record import MCRecord
 from .photon_propagation.utils import source_array_to_sources
 from .utils import get_event_times_by_rate, track_isects_cyl
-
 logger = logging.getLogger(__name__)
 
 _default_rng = defaults['rng']
 
 
 def simulate_noise(det, event, noise_window_len, rng):
-
     time_range = [0, noise_window_len]
     noise = generate_noise(det, time_range)
 
@@ -43,7 +41,6 @@ def simulate_noise(det, event, noise_window_len, rng):
 
 
 def make_single_casc_source(event_data, converter_func, key):
-
     sources = converter_func(
         event_data["pos"],
         event_data["time"],
@@ -69,7 +66,7 @@ def make_double_casc_source(event_data, converter_func, key):
 
     pos2 = event_data["pos2"]
     t2 = (
-        event_data["time"] + jnp.linalg.norm(event_data["pos"] - pos2) / Constants.c_vac
+            event_data["time"] + jnp.linalg.norm(event_data["pos"] - pos2) / Constants.c_vac
     )
 
     source_pos2, source_dir2, source_time2, source_nphotons2 = converter_func(
@@ -90,11 +87,11 @@ def make_double_casc_source(event_data, converter_func, key):
 
 
 def generate_cascade(
-    det,
-    event_data,
-    seed,
-    pprop_func,
-    converter_func,
+        det,
+        event_data,
+        seed,
+        pprop_func,
+        converter_func,
 ):
     """
     Generate a single cascade with given amplitude and position and return time of detected photons.
@@ -138,11 +135,11 @@ def generate_cascade(
 
 
 def generate_double_cascade(
-    det,
-    event_data,
-    seed,
-    pprop_func,
-    converter_func,
+        det,
+        event_data,
+        seed,
+        pprop_func,
+        converter_func,
 ):
     """
     Generate a double cascade with given amplitude and position and return time of detected photons.
@@ -186,17 +183,17 @@ def generate_double_cascade(
 
 
 def generate_cascades(
-    det,
-    cylinder_height,
-    cylinder_radius,
-    nsamples,
-    seed,
-    log_emin,
-    log_emax,
-    particle_id,
-    pprop_func,
-    converter_func,
-    noise_function,
+        det,
+        cylinder_height,
+        cylinder_radius,
+        nsamples,
+        seed,
+        log_emin,
+        log_emax,
+        particle_id,
+        pprop_func,
+        converter_func,
+        noise_function,
 ):
     """Generate a sample of cascades, randomly sampling the positions in a cylinder of given radius and length."""
     rng = np.random.RandomState(seed)
@@ -236,15 +233,16 @@ def generate_cascades(
 
 
 def generate_muon_energy_losses(
-    propagator,
-    energy,
-    track_len,
-    position,
-    direction,
-    time,
-    key,
-    loss_resolution=0.2,
-    cont_resolution=1,
+        propagator,
+        energy,
+        track_len,
+        position,
+        direction,
+        time,
+        key,
+        loss_resolution=0.2,
+        cont_resolution=1,
+        return_angle_distribution = False
 ):
     try:
         import proposal as pp
@@ -264,6 +262,7 @@ def generate_muon_energy_losses(
     asdir = []
     astime = []
     asph = []
+    asangles = []
 
     loss_map = {
         "brems": 11,
@@ -291,14 +290,22 @@ def generate_muon_energy_losses(
 
         loss_type_name = pp.particle.Interaction_Type(loss.type).name
         ptype = loss_map[loss_type_name]
+        sangles = None
 
         if e_loss < 1e3:
-            spos, sdir, stime, sph = make_pointlike_cascade_source(
-                p, t, dir, e_loss, ptype
+            sresult = make_pointlike_cascade_source(
+                p, t, dir, e_loss, ptype,
+                return_angle_distribution=return_angle_distribution
             )
+
+            if return_angle_distribution:
+                spos, sdir, stime, sph, sangles = sresult
+            else:
+                sangles = None
+                spos, sdir, stime, sph = sresult
         else:
             key, subkey = random.split(key)
-            spos, sdir, stime, sph = make_realistic_cascade_source(
+            sresult = make_realistic_cascade_source(
                 p,
                 t,
                 dir,
@@ -307,12 +314,20 @@ def generate_muon_energy_losses(
                 subkey,
                 resolution=loss_resolution,
                 moliere_rand=True,
+                return_angle_distribution=return_angle_distribution
             )
+
+            if return_angle_distribution:
+                spos, sdir, stime, sph, sangles = sresult
+            else:
+                spos, sdir, stime, sph = sresult
 
         aspos.append(spos)
         asdir.append(sdir)
         astime.append(stime)
         asph.append(sph)
+        if return_angle_distribution:
+            asangles.append(sangles)
 
     # distribute continuous losses uniformly along track
     # TODO: check if thats a good approximation
@@ -327,33 +342,55 @@ def generate_muon_energy_losses(
         p = ld * direction + position
         t = np.linalg.norm(p - position) / Constants.c_vac + time
 
-        spos, sdir, stime, sph = make_pointlike_cascade_source(
-            p, t, direction, e_loss, 11
+        sresult = make_pointlike_cascade_source(
+            p, t, direction, e_loss, 11,
+            return_angle_distribution=return_angle_distribution
         )
+        sangles = None
+
+        if return_angle_distribution:
+            spos, sdir, stime, sph, sangles = sresult
+        else:
+            spos, sdir, stime, sph = sresult
 
         aspos.append(spos)
         asdir.append(sdir)
         astime.append(stime)
         asph.append(sph)
+        if return_angle_distribution:
+            asangles.append(sangles)
 
     if not aspos:
-        return None, None, None, None, total_dist
+        return_value = (None, None, None, None,)
 
-    return (
-        np.concatenate(aspos),
-        np.concatenate(asdir),
-        np.concatenate(astime),
-        np.concatenate(asph),
-        total_dist,
+        if return_angle_distribution:
+            return_value = return_value + (None, None, )
+        return_value = return_value + (total_dist, )
+        return return_value
+
+    return_value = (
+        jnp.concatenate(aspos),
+        jnp.concatenate(asdir),
+        jnp.concatenate(astime),
+        jnp.concatenate(asph),
     )
+
+    if return_angle_distribution:
+        return_value = return_value + (
+            jnp.concatenate(asangles),
+        )
+
+    return_value = return_value + (total_dist,)
+
+    return return_value
 
 
 def generate_realistic_track(
-    det,
-    event_data,
-    key,
-    pprop_func,
-    proposal_prop,
+        det,
+        event_data,
+        key,
+        pprop_func,
+        proposal_prop,
 ):
     """
     Generate a realistic track using energy losses from PROPOSAL.
@@ -425,14 +462,13 @@ def generate_realistic_track(
 
 
 def generate_realistic_starting_track(
-    det,
-    event_data,
-    key,
-    pprop_func,
-    proposal_prop,
-    rng=_default_rng
-): 
-    
+        det,
+        event_data,
+        key,
+        pprop_func,
+        proposal_prop,
+        rng=_default_rng
+):
     inelas = rng.uniform(1e-6, 1 - 1e-6)
 
     raw_energy = event_data["energy"]
@@ -476,10 +512,10 @@ def generate_realistic_starting_track(
 
 
 def _generate_times_from_rate(
-    rate: float,
-    start_time: int,
-    end_time: int,
-    rng=_default_rng
+        rate: float,
+        start_time: int,
+        end_time: int,
+        rng=_default_rng
 ) -> List[int]:
     times_det = get_event_times_by_rate(rate=rate, start_time=start_time, end_time=end_time, rng=rng)
 
@@ -495,17 +531,17 @@ def _get_event_direction(rng=_default_rng) -> np.ndarray:
 
 
 def _generate_events(
-    det: Detector,
-    log_emin: float,
-    log_emax: float,
-    gen_func: Callable,
-    pprop_func: Callable,
-    nsamples: Optional[int] = None,
-    rate: Optional[float] = None,
-    start_time: Optional[int] = 0,
-    end_time: Optional[int] = None,
-    seed: int = 0,
-    proposal_prop=None,
+        det: Detector,
+        log_emin: float,
+        log_emax: float,
+        gen_func: Callable,
+        pprop_func: Callable,
+        nsamples: Optional[int] = None,
+        rate: Optional[float] = None,
+        start_time: Optional[int] = 0,
+        end_time: Optional[int] = None,
+        seed: int = 0,
+        proposal_prop=None,
 ):
     """Generate realistic muon tracks."""
     rng = np.random.RandomState(seed)
@@ -520,7 +556,7 @@ def _generate_events(
         iterator_range = _generate_times_from_rate(rate=rate, start_time=start_time, end_time=end_time, rng=rng)
     else:
         iterator_range = trange(nsamples)
-    
+
     cylinder_height = det.outer_cylinder[1] + 100
     cylinder_radius = det.outer_cylinder[0] + 50
 
@@ -562,16 +598,16 @@ def _generate_events(
 
 
 def generate_realistic_tracks(
-    det,
-    cylinder_height,
-    cylinder_radius,
-    nsamples,
-    seed,
-    log_emin,
-    log_emax,
-    pprop_func,
-    proposal_prop=None,
-    noise_function=None,
+        det,
+        cylinder_height,
+        cylinder_radius,
+        nsamples,
+        seed,
+        log_emin,
+        log_emax,
+        pprop_func,
+        proposal_prop=None,
+        noise_function=None,
 ):
     """Generate realistic muon tracks."""
     rng = np.random.RandomState(seed)
@@ -644,16 +680,16 @@ def generate_realistic_tracks(
 
 
 def generate_realistic_starting_tracks(
-    det,
-    cylinder_height,
-    cylinder_radius,
-    nsamples,
-    seed,
-    log_emin,
-    log_emax,
-    pprop_func,
-    proposal_prop=None,
-    noise_function=None,
+        det,
+        cylinder_height,
+        cylinder_radius,
+        nsamples,
+        seed,
+        log_emin,
+        log_emax,
+        pprop_func,
+        proposal_prop=None,
+        noise_function=None,
 ):
     """Generate realistic starting tracks (cascade + track)."""
     rng = np.random.RandomState(seed)
