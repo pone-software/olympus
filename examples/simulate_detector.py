@@ -75,7 +75,8 @@ det = detector_service.get(configuration=detector_configuration)
 # )
 photon_propagator = MockPhotonPropagator(
     detector=det,
-    c_medium=c_medium_f(700) / 1e9
+    c_medium=c_medium_f(700) / 1e9,
+    angle_resolution=18000,
 )
 
 generator_factory = GeneratorFactory(det, photon_propagator)
