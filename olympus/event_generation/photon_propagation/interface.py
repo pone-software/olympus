@@ -1,8 +1,11 @@
 """Module containing the abstract photon propagator interface."""
 from abc import ABC, abstractmethod
 
+import numpy as np
+from numpy.random import Generator
+
 from ananke.models.detector import Detector
-from ananke.models.event import SourceRecordCollection, HitCollection
+from ananke.models.event import SourceRecords, Hits
 
 
 class AbstractPhotonPropagator(ABC):
@@ -12,6 +15,7 @@ class AbstractPhotonPropagator(ABC):
             self,
             detector: Detector,
             c_medium: float,
+            seed: int = 1337,
             **kwargs
     ) -> None:
         """Constructor already saving the detector.
@@ -22,13 +26,12 @@ class AbstractPhotonPropagator(ABC):
         super().__init__(**kwargs)
         self.detector = detector
         self.c_medium = c_medium
-        self.detector_df = detector.to_pandas()
+        self.rng = np.random.default_rng(seed)
 
     @abstractmethod
     def propagate(
-            self, sources: SourceRecordCollection,
-            seed: int = 1337
-    ) -> HitCollection:
+            self, sources: SourceRecords
+    ) -> Hits:
         """Propagates photon source towards the detector.
 
         Args:

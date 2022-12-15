@@ -38,10 +38,11 @@ pmt_cath_area_r = 75e-3 / 2  # m
 module_radius = 0.21  # m
 
 # Calculate the relative area covered by PMTs
-efficiency = (
-        pmts_per_module * pmt_cath_area_r ** 2 * np.pi / (
-            4 * np.pi * module_radius ** 2)
-)
+# efficiency = (
+#         pmts_per_module * pmt_cath_area_r ** 2 * np.pi / (
+#             4 * np.pi * module_radius ** 2)
+# )
+efficiency = 0.42 # Christian S. Number
 detector_configuration = DetectorConfiguration.parse_obj(
     {
         "string": {

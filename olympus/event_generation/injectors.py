@@ -3,6 +3,7 @@ from typing import Optional
 
 import numpy as np
 
+from ananke.models.geometry import Vectors3D
 from .detector import Detector
 from .constants import defaults
 
@@ -25,16 +26,16 @@ class AbstractInjector(ABC):
         self.rng = rng
 
     @abstractmethod
-    def get_position(
+    def get_positions(
             self, n: Optional[int] = 1
-    ) -> np.ndarray:
+    ) -> Vectors3D:
         pass
 
 
 class VolumeInjector(AbstractInjector):
-    def get_position(
+    def get_positions(
             self, n: Optional[int] = 1
-    ) -> np.ndarray:
+    ) -> Vectors3D:
         theta = self.rng.uniform(0, 2 * np.pi, size=n)
         r = self.cylinder_radius * np.sqrt(self.rng.uniform(0, 1, size=n))
         samples = np.empty((n, 3))
@@ -44,13 +45,13 @@ class VolumeInjector(AbstractInjector):
             -self.cylinder_height / 2, self.cylinder_height / 2, size=n
         )
 
-        return samples
+        return Vectors3D.from_numpy(samples)
 
 
 class SurfaceInjector(AbstractInjector):
-    def get_position(
+    def get_positions(
             self, n: Optional[int] = 1
-    ) -> np.ndarray:
+    ) -> Vectors3D:
         """Sample points on a cylinder surface.
 
         :param n: number of positions to generate, defaults to 1
@@ -87,4 +88,4 @@ class SurfaceInjector(AbstractInjector):
         samples[~is_top, 1] = r * np.cos(theta[~is_top])
         samples[~is_top, 2] = self.rng.uniform(-height / 2, height / 2, size=n - n_is_top)
 
-        return samples
+        return Vectors3D.from_numpy(samples)

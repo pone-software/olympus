@@ -1,26 +1,22 @@
-from abc import ABC, abstractmethod
 import dataclasses
-from typing import Optional, Tuple, Any
-
-import pandas as pd
-from jax import random
-import awkward as ak
-import copy
-import uuid
+from abc import ABC, abstractmethod
+from typing import Optional, Tuple, Any, List
 
 import numpy as np
 import numpy.typing as npt
+import pandas as pd
+from jax import random
 
-from ananke.models.event import EventRecord, Event, SourceRecordCollection, SourceRecord
-from ananke.models.geometry import Vector3D
+from ananke.models.event import Events, EventRecords, SourceRecords
+from ananke.models.geometry import Vectors3D
+from ananke.schemas.event import SourceType
+from ananke.utils import vectors3d_to_df_columns
 from .constants import defaults
+from .detector import Detector
+from .event_generation import generate_muon_energy_losses
 from .lightyield import make_realistic_cascade_source
 from .photon_propagation.interface import AbstractPhotonPropagator
 from .utils import proposal_setup
-
-from .event_generation import generate_muon_energy_losses
-
-from .detector import Detector
 
 
 class AbstractPropagator(ABC):
@@ -39,12 +35,13 @@ class AbstractPropagator(ABC):
         self.seed = seed
 
     @abstractmethod
-    def _convert(self, event_record: EventRecord, k1: Any) -> Tuple[
-        SourceRecordCollection, Optional[float]]:
+    def _convert(self, event_records: EventRecords, k1: Any) -> Tuple[
+        SourceRecords, Optional[float]]:
         pass
 
-    def _convert_source_array_to_sources(
+    def _convert_sources_to_source_records(
             self,
+            event_id: int,
             sources_information: Tuple[
                 npt.ArrayLike,
                 npt.ArrayLike,
@@ -52,7 +49,7 @@ class AbstractPropagator(ABC):
                 npt.ArrayLike,
                 npt.ArrayLike,
             ]
-    ) -> SourceRecordCollection:
+    ) -> SourceRecords:
         source_locations = sources_information[0]
         source_orientations = sources_information[1]
         source_times = sources_information[2]
@@ -71,40 +68,36 @@ class AbstractPropagator(ABC):
 
         # only consider photon sources within a certain distance to the module
         mask = np.any(dist_matrix < 300, axis=1)
-        source_locations = source_locations[mask]
-        source_orientations = source_orientations[mask]
+        source_locations = Vectors3D.from_numpy(source_locations[mask])
+        source_orientations = Vectors3D.from_numpy(source_orientations[mask])
         source_times = source_times[mask]
         source_number_of_photons = source_number_of_photons[mask]
         source_angle_distribution = source_angle_distribution[mask]
 
-        source_collection = SourceRecordCollection()
+        source_record_df = pd.concat([
+            vectors3d_to_df_columns(source_locations, 'location_'),
+            vectors3d_to_df_columns(source_orientations, 'orientation_'),
+        ])
 
-        for index, location in enumerate(source_locations):
-            source_collection.append(
-                SourceRecord(
-                    location=Vector3D.from_numpy(location),
-                    orientation=Vector3D.from_numpy(source_orientations[index]),
-                    time=source_times[index],
-                    number_of_photons=source_number_of_photons[index],
-                    angle_distribution=source_angle_distribution[index],
-                )
-            )
+        source_record_df.assign(event_id=event_id)
+        source_record_df.assign(time=source_times)
+        source_record_df.assign(number_of_photons=source_number_of_photons)
+        source_record_df.assign(type=SourceType.STANDARD_CHERENKOV)
 
-        return source_collection
+        return SourceRecords(source_record_df)
 
-    def propagate(self, event_record: EventRecord) -> Event:
+    def propagate(self, events: EventRecords) -> Events:
         key, k1, k2 = random.split(random.PRNGKey(self.seed), 3)
 
-        sources, length = self._convert(event_record=event_record, k1=k1)
-        event_record.length = length
-        event = Event(
+        sources, length = self._convert(event_records=events, k1=k1)
+        hits = self.photon_propagator.propagate(sources)
+        events.df.assign(length=length)
+        event = Events(
             detector=self.detector,
-            event_record=event_record,
-            sources=sources
+            events=events,
+            sources=sources,
+            hits=hits
         )
-
-        if len(sources):
-            event.hits = self.photon_propagator.propagate(sources)
 
         return event
 
@@ -121,21 +114,24 @@ class TrackPropagator(AbstractPropagator):
         super().__init__(detector, photon_propagator, name, seed, **kwargs)
         self.proposal_propagator = proposal_setup()
 
-    def _convert(self, event_record: EventRecord, k1: str) -> Tuple[
-        SourceRecordCollection, Optional[float]]:
-        sources = generate_muon_energy_losses(
-            self.proposal_propagator,
-            event_record.energy,
-            event_record.length,
-            np.array(event_record.location),
-            np.array(event_record.orientation),
-            event_record.time,
-            k1,
-            return_angle_distribution=True
-        )
+    def _convert(self, event_records: EventRecords, k1: str) -> SourceRecords:
+        source_records: List[SourceRecords] = []
+        for index, event_record in event_records.df.iterrows():
+            sources = generate_muon_energy_losses(
+                self.proposal_propagator,
+                event_record['energy'],
+                event_record['length'],
+                np.array(event_record['location']),
+                np.array(event_record['orientation']),
+                event_record['time'],
+                k1,
+                return_angle_distribution=True
+            )
 
-        source_collection = self._convert_source_array_to_sources(sources[:-1])
-        return source_collection, sources[-1]
+            event_source_records = self._convert_sources_to_source_records(event_record['event_id'], sources)
+            source_records.append(event_source_records)
+
+        return SourceRecords.concat(source_records)
 
 
 class CascadePropagator(AbstractPropagator):
@@ -157,21 +153,24 @@ class CascadePropagator(AbstractPropagator):
         )
         self.resolution = resolution
 
-    def _convert(self, event_record: EventRecord, k1: str) -> Tuple[SourceRecordCollection, Optional[float]]:
-        sources = make_realistic_cascade_source(
-            np.array(event_record.location),
-            event_record.time,
-            np.array(event_record.orientation),
-            event_record.energy,
-            event_record.particle_id,
-            key=k1,
-            moliere_rand=True,
-            resolution=self.resolution,
-            return_angle_distribution=True
-        )
+    def _convert(self, event_records: EventRecords, k1: str) -> SourceRecords:
+        source_records: List[SourceRecords] = []
+        for index, event_record in event_records.df.iterrows():
+            sources = make_realistic_cascade_source(
+                np.array(event_record.location),
+                event_record.time,
+                np.array(event_record.orientation),
+                event_record.energy,
+                event_record.particle_id,
+                key=k1,
+                moliere_rand=True,
+                resolution=self.resolution,
+                return_angle_distribution=True
+            )
+            event_source_records = self._convert_sources_to_source_records(event_record['event_id'], sources)
+            source_records.append(event_source_records)
 
-        source_collection = self._convert_source_array_to_sources(sources)
-        return source_collection, None
+        return SourceRecords.concat(source_records)
 
 
 class StartingTrackPropagator(TrackPropagator, CascadePropagator):
@@ -194,23 +193,14 @@ class StartingTrackPropagator(TrackPropagator, CascadePropagator):
         )
         self.rng = np.random.default_rng(seed)
 
-    def propagate(self, event_record: EventRecord) -> Event:
+    def propagate(self, event_records: EventRecords) -> Events:
         inelas = self.rng.uniform(1e-6, 1 - 1e-6)
-        track_event_record = dataclasses.replace(
-            event_record, energy=inelas * event_record.energy
-        )
-        cascade_event_record = dataclasses.replace(
-            event_record, energy=(1 - inelas) * event_record.energy
-        )
+        track_event_records = EventRecords(event_records.df.copy())
+        cascade_event_records = EventRecords(event_records.df.copy())
+        track_event_records.df.assign(energy=lambda x: inelas * x.energy)
+        cascade_event_records.df.assign(energy=lambda x: (1 - inelas) * x.energy)
 
-        track_event = super(TrackPropagator, self).propagate(track_event_record)
-        cascade_event = super(CascadePropagator, self).propagate(
-            cascade_event_record
-        )
+        track_event = super(TrackPropagator, self).propagate(track_event_records)
+        cascade_event = super(CascadePropagator, self).propagate(cascade_event_records)
 
-        return Event(
-            detector=self.detector,
-            sources=track_event.sources + cascade_event.sources,
-            hits=track_event.hits + cascade_event.hits,
-            event_record=event_record,
-        )
+        return Events.concat([track_event, cascade_event])

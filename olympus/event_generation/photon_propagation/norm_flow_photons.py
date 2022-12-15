@@ -8,7 +8,7 @@ from jax.lax import cond
 import numpy as np
 
 from ananke.models.detector import Detector
-from ananke.models.event import Hit, SourceRecord, SourceRecordCollection, HitCollection
+from ananke.models.event import SourceRecords, Hits
 from hyperion.models.photon_arrival_time_nflow.net import (
     make_counts_net_fn,
     make_shape_conditioner_fn,
@@ -731,7 +731,7 @@ class NormalFlowPhotonPropagator(AbstractPhotonPropagator):
                 sampling function. bucket_size = padding_base**N
 
         """
-        super().__init__(detector=detector)
+        super().__init__(detector=detector, c_medium=c_medium)
 
         self.generate_norm_flow_photons = make_generate_norm_flow_photons(
             shape_model_path,
@@ -741,9 +741,9 @@ class NormalFlowPhotonPropagator(AbstractPhotonPropagator):
         )
 
     def propagate(
-            self, sources: SourceRecordCollection,
+            self, sources: SourceRecords,
             seed: int = 1337
-    ) -> HitCollection:
+    ) -> Hits:
         """Propagates using the normal flow propagator.
 
         Args:
@@ -753,32 +753,30 @@ class NormalFlowPhotonPropagator(AbstractPhotonPropagator):
         Returns:
             List of hits containing propagation result
         """
-        source_df = sources.to_pandas()
 
-        if len(source_df):
+        if len(sources):
             hits = self.generate_norm_flow_photons(
-                self.detector_df[['module_x', 'module_y', 'module_z', ]].to_numpy(dtype=np.float32),
-                self.detector_df['pmt_efficiency'].to_numpy(dtype=np.float32),
-                source_df[['location_x', 'location_y', 'location_z']].to_numpy(dtype=np.float32),
-                source_df[['orientation_x', 'orientation_y', 'orientation_z']].to_numpy(dtype=np.float32),
-                np.expand_dims(source_df['time'].to_numpy(dtype=np.float32), axis=1),
-                np.expand_dims(source_df['number_of_photons'].to_numpy(dtype=np.float32), axis=1),
+                self.detector.module_locations.to_numpy(dtype=np.float32),
+                self.detector.pmt_efficiencies.to_numpy(dtype=np.float32),
+                sources.locations.to_numpy(dtype=np.float32),
+                sources.orientations.to_numpy(dtype=np.float32),
+                np.expand_dims(sources.times.to_numpy(dtype=np.float32), axis=1),
+                np.expand_dims(sources.number_of_photons.to_numpy(dtype=np.float32), axis=1),
                 seed
             )
         else:
             hits = []
 
-        hit_collection = HitCollection()
+        hits_collection = []
 
         for index, module in enumerate(hits):
             for hit in module:
-                hit_collection.append(
-                    Hit(
+                hits_collection.append({
                         pmt_id=self.detector_df.loc[index, "pmt_id"],
                         module_id=self.detector_df.loc[index, "module_id"],
                         string_id=self.detector_df.loc[index, "string_id"],
                         time=hit
-                    )
+                }
                 )
 
         return hit_collection

@@ -1,7 +1,7 @@
 """Event Generators."""
 import functools
 import logging
-from typing import Callable, Optional, List, Tuple
+from typing import Callable, Optional, List
 
 import awkward as ak
 import numpy as np

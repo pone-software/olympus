@@ -1,11 +1,15 @@
+import uuid
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple, Type, List
+from typing import Optional, Type, List
 import numpy as np
 import awkward as ak
+import pandas as pd
 from tqdm.auto import trange
 
-from ananke.models.event import EventRecord, EventType, EventCollection
-from ananke.models.geometry import Vector3D
+from ananke.models.event import Events, EventRecords
+from ananke.models.geometry import Vectors3D
+from ananke.schemas.event import EventType
+from ananke.utils import vectors3d_to_df_columns
 from .injectors import (
     AbstractInjector,
     SurfaceInjector,
@@ -20,8 +24,7 @@ from .propagator import (
 )
 from .spectra import AbstractSpectrum, UniformSpectrum
 
-from .mc_record import MCRecord
-from .detector import Detector, sample_direction, generate_noise
+from .detector import Detector, sample_direction
 from .constants import defaults
 from .utils import get_event_times_by_rate
 
@@ -42,19 +45,19 @@ class AbstractGenerator(ABC):
         self.rng = rng
 
     @abstractmethod
-    def generate(self, start_time=0, end_time=None, **kwargs) -> EventCollection:
+    def generate(self, start_time=0, end_time=None, **kwargs) -> Events:
         pass
 
     def generate_per_timeframe(
             self, start_time: int, end_time: int, rate: Optional[float] = None
-    ) -> EventCollection:
+    ) -> Events:
         return self.generate(start_time=start_time, end_time=end_time, rate=rate)
 
     def generate_nsamples(
             self,
             nsamples: int,
             start_time: Optional[int] = 0
-            ) -> EventCollection:
+            ) -> Events:
         return self.generate(nsamples=nsamples, start_time=start_time)
 
 
@@ -83,7 +86,7 @@ class EventGenerator(AbstractGenerator):
             n_samples: Optional[int] = None,
             start_time: Optional[int] = 0,
             end_time: Optional[int] = None,
-    ) -> EventCollection:
+    ) -> Events:
         """Generate realistic muon tracks."""
 
         if n_samples is None and (self.rate is None or end_time is None):
@@ -102,31 +105,25 @@ class EventGenerator(AbstractGenerator):
         track_length = 3000
         iterator_range = trange(n_samples)
 
-        events = EventCollection()
-
-        positions = self.injector.get_position(n=n_samples)
+        locations = self.injector.get_positions(n=n_samples)
         energies = self.spectrum.get_energy(n=n_samples)
-        directions = sample_direction(n_samples=n_samples, rng=self.rng)
+        orientations = Vectors3D.from_numpy(sample_direction(n_samples=n_samples, rng=self.rng))
+        ids = [uuid.uuid4().int for x in range(n_samples)]
+        event_records_df = pd.concat([
+            vectors3d_to_df_columns(locations, 'location_'),
+            vectors3d_to_df_columns(orientations, 'orientation_'),
+        ])
 
-        for i in iterator_range:
+        event_records_df.assign(event_id=ids)
+        event_records_df.assign(energy=energies)
+        event_records_df.assign(length=track_length)
+        event_records_df.assign(time=start_time)
 
-            if time_based:
-                start_time = start_times[i]
+        event_records = EventRecords(df=event_records_df)
 
-            event_data = EventRecord(
-                type=self.event_type,
-                location=Vector3D.from_numpy(positions[i]),
-                energy=energies[i],
-                orientation=Vector3D.from_numpy(directions[i]),
-                length=track_length,
-                time=start_time,
-                particle_id=self.particle_id,
-            )
+        events = self.propagator.propagate(event_records)
 
-            event = self.propagator.propagate(event_record=event_data)
-
-            if len(event.hits) > 0:
-                events.append(event)
+        # TODO: Drop Empty events
 
         return events
 
@@ -193,26 +190,26 @@ class StartingTrackEventGenerator(EventGenerator):
         )
 
 
-class RandomNoiseGenerator(AbstractGenerator):
-    def __init__(
-            self,
-            detector: Detector,
-            *args,
-            **kwargs
-    ):
-        super().__init__(*args, **kwargs)
-        self.detector = detector
-
-    def generate(self, start_time=0, end_time=None, **kwargs) -> Tuple[List, List]:
-        time_range = [start_time, end_time]
-        return [generate_noise(self.detector, time_range, self.rng)], [MCRecord(
-            'noise', [], EventRecord(
-                orientation=Vector3D(x=0, y=0, z=0),
-                energy=0.0,
-                location=Vector3D(x=0, y=0, z=0),
-                time=0
-            )
-        )]
+# class RandomNoiseGenerator(AbstractGenerator):
+#     def __init__(
+#             self,
+#             detector: Detector,
+#             *args,
+#             **kwargs
+#     ):
+#         super().__init__(*args, **kwargs)
+#         self.detector = detector
+#
+#     def generate(self, start_time=0, end_time=None, **kwargs) -> Tuple[List, List]:
+#         time_range = [start_time, end_time]
+#         return [generate_noise(self.detector, time_range, self.rng)], [MCRecord(
+#             'noise', [], EventRecord(
+#                 orientation=Vector3D(x=0, y=0, z=0),
+#                 energy=0.0,
+#                 location=Vector3D(x=0, y=0, z=0),
+#                 time=0
+#             )
+#         )]
 
 
 class GeneratorFactory:
@@ -225,7 +222,7 @@ class GeneratorFactory:
             "track": TrackEventGenerator,
             "starting_track": StartingTrackEventGenerator,
             "cascade": CascadeEventGenerator,
-            "noise": RandomNoiseGenerator
+            # "noise": RandomNoiseGenerator
         }
         self.detector = detector
         self.photon_propagator = photon_propagator
@@ -250,16 +247,16 @@ class GeneratorCollection:
     def add_generator(self, generator: AbstractGenerator):
         self.generators.append(generator)
 
-    def generate(self, **kwargs) -> EventCollection:
-        event_collection = EventCollection()
+    def generate(self, **kwargs) -> Events:
+        events_list: List[Events] = []
 
         for generator in self.generators:
-            event_collection += generator.generate(**kwargs)
+            events_list.append(generator.generate(**kwargs))
 
-        return event_collection
+        return Events.concat(events_list)
 
-    def generate_per_timeframe(self, start_time: int, end_time: int) -> EventCollection:
+    def generate_per_timeframe(self, start_time: int, end_time: int) -> Events:
         return self.generate(start_time=start_time, end_time=end_time)
 
-    def generate_nsamples(self, nsamples: int) -> EventCollection:
+    def generate_nsamples(self, nsamples: int) -> Events:
         return self.generate(nsamples=nsamples)

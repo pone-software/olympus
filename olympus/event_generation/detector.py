@@ -1,6 +1,5 @@
 """Collection of classes implementing a detector."""
 import itertools
-from dataclasses import dataclass, field
 from typing import Tuple
 
 import awkward as ak
@@ -12,26 +11,20 @@ from ananke.services.detector import DetectorBuilderService
 
 from .utils import get_event_times_by_rate
 
-@dataclass
 class Detector(AnankeDetector):
     """Olympus's implementation of Ananke Detector."""
 
-    #: distance from center to the most outer string
-    outer_radius: float = field(init=False)
+    @property
+    def outer_radius(self) -> float:
+        """Returns the distance of the farthest out module."""
+        return np.linalg.norm(self.strings.module_locations.to_numpy(), axis=1).max()
 
-    #: radius from part one and height as second value
-    outer_cylinder: Tuple[float, float] = field(init=False)
+    @property
+    def outer_cylinder(self) -> Tuple[float, float]:
+        """Returns a tuple of the height and radius of the outer cylinder."""
+        module_locations = self.strings.module_locations.to_numpy()
 
-
-    def __post_init__(self) -> None:
-        """Set additional outer radius and cylinder to class."""
-        dataframe = self.to_pandas()
-
-        module_locations = np.array(dataframe[['module_x', 'module_y', 'module_z']])
-
-        # TODO: check whether radius correct
-        self.outer_radius = np.linalg.norm(module_locations, axis=1).max()
-        self.outer_cylinder = (
+        return (
             np.linalg.norm(module_locations[:, :2], axis=1).max(),
             2 * np.abs(module_locations[:, 2].max()),
         )
