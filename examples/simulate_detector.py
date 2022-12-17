@@ -1,31 +1,17 @@
 import json
 import os
-import pickle
 
 import numpy as np
 
-from ananke.schemas.detector import DetectorConfiguration
+from ananke.configurations.detector import DetectorConfiguration
+from ananke.services.detector import DetectorBuilderService
 from hyperion.constants import Constants
 from hyperion.medium import medium_collections
-from olympus.event_generation.detector import (
-    DetectorBuilder
-)
 from olympus.event_generation.generators import GeneratorCollection, GeneratorFactory
+from olympus.event_generation.medium import MediumEstimationVariant, Medium
 from olympus.event_generation.photon_propagation.mock_photons import MockPhotonPropagator
-from olympus.event_generation.photon_propagation.norm_flow_photons import (
-    NormalFlowPhotonPropagator,
-)
 
 os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.5"
-
-path_to_config = "../../hyperion/data/pone_config_optimistic.json"
-config = json.load(open(path_to_config))["photon_propagation"]
-ref_ix_f, sca_a_f, sca_l_f, something_else = medium_collections[config["medium"]]
-
-
-def c_medium_f(wl):
-    """Speed of light in medium for wl (nm)."""
-    return Constants.BaseConstants.c_vac / ref_ix_f(wl)
 
 
 rng = np.random.RandomState(31338)
@@ -65,8 +51,9 @@ detector_configuration = DetectorConfiguration.parse_obj(
     }
 )
 
-detector_service = DetectorBuilder()
+detector_service = DetectorBuilderService()
 det = detector_service.get(configuration=detector_configuration)
+medium = Medium(MediumEstimationVariant.PONE_OPTIMISTIC)
 
 # photon_propagator = NormalFlowPhotonPropagator(
 #     detector=det,
@@ -76,7 +63,7 @@ det = detector_service.get(configuration=detector_configuration)
 # )
 photon_propagator = MockPhotonPropagator(
     detector=det,
-    c_medium=c_medium_f(700) / 1e9,
+    medium=medium,
     angle_resolution=18000,
 )
 
@@ -109,7 +96,5 @@ generator_collection.add_generator(cascades_generator)
 event_collection = generator_collection.generate(
     n_samples=1
 )
-
-print(event_collection.to_pandas())
 
 #pickle.dump(event_collection, open('./dataset/test', "wb"))

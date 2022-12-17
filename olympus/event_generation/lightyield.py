@@ -27,12 +27,19 @@ def simple_cascade_light_yield(energy, *args):
 
     return energy * photons_per_GeV
 
-def fennel_angle_distro(energy, particle_id, angle_resolution=18000):
+def fennel_angle_distribution_function(energy: float, particle_id: int) -> Callable:
+    """Fetches the angle distribution function for a given energy and particle.
+
+    Args:
+        energy: Energy of the particle
+        particle_id: Particle Id of the particle
+
+    Returns:
+        Angular distibution function for particle
+    """
     funcs = fennel_instance.auto_yields(energy, particle_id, function=True)
     angles_func = funcs[5]
-
-    angles = jnp.linspace(0, 180, angle_resolution)
-    return angles_func(angles)
+    return angles_func
 
 
 
@@ -93,9 +100,7 @@ def make_pointlike_cascade_source(
     dir,
     energy,
     particle_id,
-    wavelength_range=None,
-    angle_resolution=18000,
-    return_angle_distribution: bool=False
+    wavelength_range=None
 ):
     """
     Create a pointlike lightsource.
@@ -113,8 +118,6 @@ def make_pointlike_cascade_source(
             Particle type (PDG ID)
         wavelength_range: tuple
             Wavelength interval (nm)
-        return_angle_distribution: bool
-            Whether angles and distances should be returned
 
 
     Returns:
@@ -130,13 +133,7 @@ def make_pointlike_cascade_source(
     source_pos = pos[np.newaxis, :]
     source_dir = dir[np.newaxis, :]
     source_time = jnp.asarray([t0])[np.newaxis, :]
-    return_value = source_pos, source_dir, source_time, source_nphotons
-
-    if return_angle_distribution:
-
-        return_value = return_value + (fennel_angle_distro(energy, particle_id, angle_resolution=angle_resolution),)
-    # source = PhotonSource(pos, n_photons, t0, dir)
-    return return_value
+    return source_pos, source_dir, source_time, source_nphotons
 
 
 def make_realistic_cascade_source(
@@ -148,9 +145,7 @@ def make_realistic_cascade_source(
     key,
     resolution=0.2,
     moliere_rand=False,
-    wavelength_range=None,
-    angle_resolution=18000,
-    return_angle_distribution=False
+    wavelength_range=None
 ):
     """
     Create a realistic (elongated) particle cascade.
@@ -177,8 +172,6 @@ def make_realistic_cascade_source(
             Switch moliere randomization
         wavelength_range: tuple
             Wavelength interval (nm)
-        return_angle_distribution: bool
-            Whether angles and distances should be returned
     """
     if wavelength_range is None:
         wavelength_range = [290, 700]
@@ -208,17 +201,9 @@ def make_realistic_cascade_source(
     source_dir = jnp.tile(dir, (dist_along.shape[0], 1))
     source_nphotons = frac_yields * n_photons_total
     source_time = t0 + dist_along / (Constants.c_vac)
-
-    return_value = (
+    return (
         source_pos,
         source_dir,
         source_time[:, np.newaxis],
         source_nphotons[:, np.newaxis],
     )
-
-    if return_angle_distribution:
-        angle_distribution = fennel_angle_distro(energy, particle_id, angle_resolution=angle_resolution)
-        return_value = return_value + (
-            jnp.tile(angle_distribution, (dist_along.shape[0],1)),
-        )
-    return return_value

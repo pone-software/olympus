@@ -1,15 +1,16 @@
 """Module containing code for mock photon source propagation."""
-from typing import Union, Tuple, Optional
+from typing import Union, Tuple
 
 import awkward as ak
 import numpy as np
 import numpy.typing as npt
 import jax.numpy as jnp
-from scipy.interpolate import UnivariateSpline
+import pandas as pd
 
 from ananke.models.detector import Detector
-from ananke.models.event import SourceRecords, Hits
-from hyperion.medium import sca_len_func_antares
+from ananke.models.event import SourceRecords, Hits, EventRecords
+from olympus.event_generation.lightyield import fennel_angle_distribution_function
+from olympus.event_generation.medium import Medium
 from olympus.event_generation.photon_propagation.interface import \
     AbstractPhotonPropagator
 
@@ -66,28 +67,20 @@ class MockPhotonPropagator(AbstractPhotonPropagator):
     def __init__(
             self,
             detector: Detector,
+            medium: Medium,
             angle_resolution: int = 18000,
-            attenuation_lengths: Optional[npt.ArrayLike] = None,
             default_wavelength: float = 450,
             **kwargs
     ) -> None:
-        super().__init__(detector=detector, **kwargs)
+        super().__init__(detector=detector, medium=medium, **kwargs)
         # TODO: Migrate Angle and Wavelength away
         self.angle_resolution = angle_resolution
         self.default_wavelengths = default_wavelength
-        if attenuation_lengths is None:
-            attenuation_lengths = [
-                [365, 10.4],
-                [400, 14.6],
-                [450, 27.7],
-                [585, 7.1]
-            ]
-        self.attenuation_lengths = jnp.array(attenuation_lengths)
 
         pmt_locations = self.detector.pmt_locations.to_numpy(np.float32)
         self.pmt_positions = jnp.array(pmt_locations)
 
-        self.pmt_indices = self.detector.pmt_indices
+        self.pmt_indices = self.detector.indices
 
         pmt_orientations = self.detector.pmt_orientations.to_numpy(np.float32)
         self.pmt_orientations = jnp.array(pmt_orientations)
@@ -164,7 +157,7 @@ class MockPhotonPropagator(AbstractPhotonPropagator):
         )
         pmt_opening_angles = 2 * jnp.arcsin(
             jnp.divide(
-                jnp.expand_dims(self.pmt_radius, axis=1),
+                self.pmt_radius,
                 pmt_to_source_distances
             )
         )
@@ -281,7 +274,7 @@ class MockPhotonPropagator(AbstractPhotonPropagator):
         yield_per_source_and_pmt = jnp.einsum(
             '...ij->...',
             angular_distribution_per_pmt
-        ) * jnp.square(180 / self.angle_resolution) # / r**2
+        ) * jnp.square(180 / self.angle_resolution)  # / r**2
 
         # we only have yield at pmts facing the source
         mask_condition = pmt_to_source_angles < jnp.pi / 2
@@ -298,21 +291,38 @@ class MockPhotonPropagator(AbstractPhotonPropagator):
             self,
             pmt_to_source_distances: jnp.ndarray
     ) -> jnp.ndarray:
-        spline = UnivariateSpline(
-            self.attenuation_lengths[:, 0],
-            self.attenuation_lengths[:, 1],
-            k=2,
-            s=0.01
-        )
-        attenuation_length = jnp.reciprocal(spline(self.default_wavelengths))
-        scattering_length = jnp.reciprocal(sca_len_func_antares(self.default_wavelengths))
+        absorption_length = self.medium.get_absolute_length(self.default_wavelengths)
 
-        absorption_length = jnp.reciprocal(attenuation_length - scattering_length)
+        return jnp.exp(-1.0 * jnp.divide(pmt_to_source_distances, absorption_length))
 
-        return jnp.exp(-1.0*jnp.divide(pmt_to_source_distances, absorption_length))
+    def _get_angle_distributions(
+            self, events: EventRecords, sources: SourceRecords
+    ) -> jnp.ndarray:
+        angle_distributions = {}
+        source_angle_distributions = []
+
+        angles = jnp.linspace(0, 180, self.angle_resolution)
+        n_photon = self.medium.get_refractive_index(self.default_wavelengths)
+
+        for index, row in events.df.iterrows():
+            angle_distribution = fennel_angle_distribution_function(
+                energy=row.energy,
+                particle_id=row.particle_id
+            )
+            angle_distributions[row.event_id] = angle_distribution(
+                angles,
+                n_photon
+            )
+
+        for index, row in sources.df.iterrows():
+            source_angle_distributions.append(angle_distributions[row.event_id])
+
+        return jnp.array(source_angle_distributions)
 
     def propagate(
-            self, sources: SourceRecords,
+            self,
+            events: EventRecords,
+            sources: SourceRecords,
             seed: int = 1337
     ) -> Hits:
         number_of_sources = len(sources)
@@ -330,8 +340,6 @@ class MockPhotonPropagator(AbstractPhotonPropagator):
         source_times = sources.times.to_numpy(np.float32)
         source_times = jnp.array(source_times)
 
-        source_angle_distributions = sources.angle_distributions
-
         # 1. Calculate angle between PMT and Source direction
         expanded_pmt_positions = jnp.tile(
             jnp.expand_dims(self.pmt_positions, axis=1),
@@ -340,34 +348,48 @@ class MockPhotonPropagator(AbstractPhotonPropagator):
         pmt_to_source = source_locations - expanded_pmt_positions
         pmt_to_source_distances = jnp.linalg.norm(pmt_to_source, axis=2)
 
+        source_angle_distributions = self._get_angle_distributions(
+            events=events,
+            sources=sources
+        )
+
         # 2. Mask sources in direction of PMT (180°)
         angular_yield = self.__calculate_angular_yield(
             number_of_modules=number_of_pmts,
             number_of_sources=number_of_sources,
             source_orientations=source_orientations,
-            source_angle_distributions=source_angle_distributions,
             pmt_to_source=pmt_to_source,
+            source_angle_distributions=source_angle_distributions,
             pmt_to_source_distances=pmt_to_source_distances
         )
         # 3. Calculate Yield based on distance
-        distance_yield = self.__calculate_distance_yield(pmt_to_source_distances=pmt_to_source_distances)
+        distance_yield = self.__calculate_distance_yield(
+            pmt_to_source_distances=pmt_to_source_distances
+        )
 
         # 4. Calculate Yield based on PMT Efficiency
-        efficiency_yield = self.pmt_efficiencies[:, jnp.newaxis]
+        efficiency_yield = self.pmt_efficiencies
 
         # 4. Calculate Number of Photons
         total_yield = jnp.multiply(angular_yield, distance_yield)
         total_yield = jnp.multiply(total_yield, efficiency_yield)
         photons_per_pmt_per_source = jnp.multiply(total_yield, source_photons.T)
-        photons_per_pmt_per_source = jnp.rint(photons_per_pmt_per_source).astype('int16')
+        photons_per_pmt_per_source = jnp.rint(photons_per_pmt_per_source).astype(
+            'int16'
+        )
 
         # 5. Calculate Arrival Time
-        travel_time = pmt_to_source_distances / self.c_medium
+        travel_time = pmt_to_source_distances / self.medium.get_c_medium_photons(
+            self.default_wavelengths
+        )
         times_per_pmt_per_source = jnp.add(travel_time, source_times.T)
 
         # 5. Distribute Yield using Gamma distribution
         iterator = np.nditer(photons_per_pmt_per_source, flags=['multi_index'])
-        hits = Hits()
+
+        hit_list = []
+
+        # TODO: Speed Up
 
         for _ in iterator:
             pmt_index, source_index = iterator.multi_index
@@ -383,15 +405,19 @@ class MockPhotonPropagator(AbstractPhotonPropagator):
                 1.0,
                 photons
             )
-            for hit_time in hit_times:
-                hit = Hit(
-                    string_id=string_id,
-                    module_id=module_id,
-                    pmt_id=pmt_id,
-                    time=hit_time
-                )
-                hit_collection.append(hit)
+            hit_list += map(
+                lambda x: {
+                    'event_id': int(sources.df.iloc[source_index]['event_id']),
+                    'string_id': string_id,
+                    'module_id': module_id,
+                    'pmt_id': pmt_id,
+                    'time': x
+                },
+                hit_times
+            )
 
-
+        hits_df = pd.DataFrame(hit_list)
+        hits_df.head()
+        hits = Hits(df=hits_df)
 
         return hits

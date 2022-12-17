@@ -4,7 +4,7 @@ from typing import Optional
 import numpy as np
 
 from ananke.models.geometry import Vectors3D
-from .detector import Detector
+from ananke.models.detector import Detector
 from .constants import defaults
 
 

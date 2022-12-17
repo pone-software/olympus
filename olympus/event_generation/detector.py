@@ -1,42 +1,8 @@
 """Collection of classes implementing a detector."""
-import itertools
-from typing import Tuple
-
 import awkward as ak
 import numpy as np
 
-from ananke.models.detector import Detector as AnankeDetector
-from ananke.schemas.detector import DetectorConfiguration
-from ananke.services.detector import DetectorBuilderService
-
 from .utils import get_event_times_by_rate
-
-class Detector(AnankeDetector):
-    """Olympus's implementation of Ananke Detector."""
-
-    @property
-    def outer_radius(self) -> float:
-        """Returns the distance of the farthest out module."""
-        return np.linalg.norm(self.strings.module_locations.to_numpy(), axis=1).max()
-
-    @property
-    def outer_cylinder(self) -> Tuple[float, float]:
-        """Returns a tuple of the height and radius of the outer cylinder."""
-        module_locations = self.strings.module_locations.to_numpy()
-
-        return (
-            np.linalg.norm(module_locations[:, :2], axis=1).max(),
-            2 * np.abs(module_locations[:, 2].max()),
-        )
-
-class DetectorBuilder(DetectorBuilderService):
-    """DetectorBuilder override for Olympus"""
-    def __init__(self):
-        super().__init__(Detector)
-
-    def get(self, configuration: DetectorConfiguration) -> Detector:
-        return super().get(configuration)
-
 
 
 def sample_cylinder_surface(height, radius, n, rng=np.random.RandomState(1337)):

@@ -5,7 +5,8 @@ import numpy as np
 from numpy.random import Generator
 
 from ananke.models.detector import Detector
-from ananke.models.event import SourceRecords, Hits
+from ananke.models.event import SourceRecords, Hits, EventRecords
+from olympus.event_generation.medium import Medium
 
 
 class AbstractPhotonPropagator(ABC):
@@ -14,7 +15,7 @@ class AbstractPhotonPropagator(ABC):
     def __init__(
             self,
             detector: Detector,
-            c_medium: float,
+            medium: Medium,
             seed: int = 1337,
             **kwargs
     ) -> None:
@@ -22,21 +23,26 @@ class AbstractPhotonPropagator(ABC):
 
         Args:
             detector: Detector to be set
+            medium: Medium for which to propagate
+            seed: Seed of random number Generator
         """
         super().__init__(**kwargs)
         self.detector = detector
-        self.c_medium = c_medium
+        self.medium = medium
         self.rng = np.random.default_rng(seed)
 
     @abstractmethod
     def propagate(
-            self, sources: SourceRecords
+            self,
+            events: EventRecords,
+            sources: SourceRecords,
+            **kwargs
     ) -> Hits:
         """Propagates photon source towards the detector.
 
         Args:
+            events: events of sources to propagate
             sources: photon source to propagate
-            seed: seed by which to propagate
 
         Returns:
             List of the detector hits based on photon source

@@ -6,10 +6,10 @@ import awkward as ak
 import pandas as pd
 from tqdm.auto import trange
 
+from ananke.models.detector import Detector
 from ananke.models.event import Events, EventRecords
 from ananke.models.geometry import Vectors3D
 from ananke.schemas.event import EventType
-from ananke.utils import vectors3d_to_df_columns
 from .injectors import (
     AbstractInjector,
     SurfaceInjector,
@@ -24,7 +24,7 @@ from .propagator import (
 )
 from .spectra import AbstractSpectrum, UniformSpectrum
 
-from .detector import Detector, sample_direction
+from .detector import sample_direction
 from .constants import defaults
 from .utils import get_event_times_by_rate
 
@@ -57,7 +57,7 @@ class AbstractGenerator(ABC):
             self,
             nsamples: int,
             start_time: Optional[int] = 0
-            ) -> Events:
+    ) -> Events:
         return self.generate(nsamples=nsamples, start_time=start_time)
 
 
@@ -107,17 +107,24 @@ class EventGenerator(AbstractGenerator):
 
         locations = self.injector.get_positions(n=n_samples)
         energies = self.spectrum.get_energy(n=n_samples)
-        orientations = Vectors3D.from_numpy(sample_direction(n_samples=n_samples, rng=self.rng))
-        ids = [uuid.uuid4().int for x in range(n_samples)]
-        event_records_df = pd.concat([
-            vectors3d_to_df_columns(locations, 'location_'),
-            vectors3d_to_df_columns(orientations, 'orientation_'),
-        ])
+        orientations = Vectors3D.from_numpy(
+            sample_direction(n_samples=n_samples, rng=self.rng)
+            )
+        ids = [uuid.uuid1().int >> 64 for x in range(n_samples)]
+        event_records_df = pd.concat(
+            [
+                locations.get_df_with_prefix('location_'),
+                orientations.get_df_with_prefix('orientation_'),
+            ],
+            axis=1
+        )
 
-        event_records_df.assign(event_id=ids)
-        event_records_df.assign(energy=energies)
-        event_records_df.assign(length=track_length)
-        event_records_df.assign(time=start_time)
+        event_records_df['event_id'] = ids
+        event_records_df['energy'] = energies
+        event_records_df['length'] = track_length
+        event_records_df['time'] = start_time
+        event_records_df['type'] = self.event_type.value
+        event_records_df['particle_id'] = self.particle_id
 
         event_records = EventRecords(df=event_records_df)
 

@@ -769,14 +769,14 @@ class NormalFlowPhotonPropagator(AbstractPhotonPropagator):
 
         hits_collection = []
 
-        for index, module in enumerate(hits):
-            for hit in module:
-                hits_collection.append({
-                        pmt_id=self.detector_df.loc[index, "pmt_id"],
-                        module_id=self.detector_df.loc[index, "module_id"],
-                        string_id=self.detector_df.loc[index, "string_id"],
-                        time=hit
-                }
-                )
+        # for index, module in enumerate(hits):
+        #     for hit in module:
+        #         hits_collection.append({
+        #                 pmt_id=self.detector_df.loc[index, "pmt_id"],
+        #                 module_id=self.detector_df.loc[index, "module_id"],
+        #                 string_id=self.detector_df.loc[index, "string_id"],
+        #                 time=hit
+        #         }
+        #         )
 
         return hit_collection

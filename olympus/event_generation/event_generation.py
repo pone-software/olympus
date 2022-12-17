@@ -9,9 +9,9 @@ from jax import numpy as jnp
 from jax import random
 from tqdm.auto import trange
 
+from ananke.models.detector import Detector
 from .constants import Constants, defaults
 from .detector import (
-    Detector,
     generate_noise,
     sample_cylinder_surface,
     sample_cylinder_volume,
@@ -528,73 +528,6 @@ def _get_event_energy(log_emin: float, log_emax: float, rng=_default_rng) -> np.
 
 def _get_event_direction(rng=_default_rng) -> np.ndarray:
     return sample_direction(1, rng).squeeze()
-
-
-def _generate_events(
-        det: Detector,
-        log_emin: float,
-        log_emax: float,
-        gen_func: Callable,
-        pprop_func: Callable,
-        nsamples: Optional[int] = None,
-        rate: Optional[float] = None,
-        start_time: Optional[int] = 0,
-        end_time: Optional[int] = None,
-        seed: int = 0,
-        proposal_prop=None,
-):
-    """Generate realistic muon tracks."""
-    rng = np.random.RandomState(seed)
-    key, subkey = random.split(random.PRNGKey(seed))
-
-    if nsamples is None and (rate is None or end_time is None):
-        raise ValueError('Either number of samples or time parameters must be set')
-
-    time_based = nsamples is None
-
-    if time_based:
-        iterator_range = _generate_times_from_rate(rate=rate, start_time=start_time, end_time=end_time, rng=rng)
-    else:
-        iterator_range = trange(nsamples)
-
-    cylinder_height = det.outer_cylinder[1] + 100
-    cylinder_radius = det.outer_cylinder[0] + 50
-
-    # TODO: Calculate intersection with generation cylinder
-    track_length = 3000
-
-    events = []
-    records = []
-
-    for i in iterator_range:
-        pos = sample_cylinder_volume(height=cylinder_height, radius=cylinder_radius, n=1, rng=rng)
-        energy = _get_event_energy(log_emin=log_emin, log_emax=log_emax, rng=rng)
-        direc = _get_event_direction(rng=rng)
-
-        event_data = {
-            "pos": pos,
-            "dir": direc,
-            "energy": energy,
-            "length": track_length,
-        }
-
-        if time_based:
-            event_data["time"] = i
-        else:
-            event_data["time"] = 0
-
-        event, record = gen_func(
-            det,
-            event_data,
-            key=subkey,
-            proposal_prop=proposal_prop,
-            pprop_func=pprop_func,
-        )
-
-        events.append(event)
-        records.append(record)
-
-    return events, records
 
 
 def generate_realistic_tracks(
