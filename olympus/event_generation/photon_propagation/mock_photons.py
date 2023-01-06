@@ -1,14 +1,13 @@
 """Module containing code for mock photon source propagation."""
 from typing import Union, Tuple
 
-import awkward as ak
 import numpy as np
 import numpy.typing as npt
 import jax.numpy as jnp
 import pandas as pd
 
 from ananke.models.detector import Detector
-from ananke.models.event import SourceRecords, Hits, EventRecords
+from ananke.models.event import Sources, Hits, EventRecords
 from olympus.event_generation.lightyield import fennel_angle_distribution_function
 from olympus.event_generation.medium import Medium
 from olympus.event_generation.photon_propagation.interface import \
@@ -69,13 +68,11 @@ class MockPhotonPropagator(AbstractPhotonPropagator):
             detector: Detector,
             medium: Medium,
             angle_resolution: int = 18000,
-            default_wavelength: float = 450,
             **kwargs
     ) -> None:
         super().__init__(detector=detector, medium=medium, **kwargs)
         # TODO: Migrate Angle and Wavelength away
         self.angle_resolution = angle_resolution
-        self.default_wavelengths = default_wavelength
 
         pmt_locations = self.detector.pmt_locations.to_numpy(np.float32)
         self.pmt_positions = jnp.array(pmt_locations)
@@ -296,7 +293,7 @@ class MockPhotonPropagator(AbstractPhotonPropagator):
         return jnp.exp(-1.0 * jnp.divide(pmt_to_source_distances, absorption_length))
 
     def _get_angle_distributions(
-            self, events: EventRecords, sources: SourceRecords
+            self, records: EventRecords, sources: Sources
     ) -> jnp.ndarray:
         angle_distributions = {}
         source_angle_distributions = []
@@ -304,27 +301,28 @@ class MockPhotonPropagator(AbstractPhotonPropagator):
         angles = jnp.linspace(0, 180, self.angle_resolution)
         n_photon = self.medium.get_refractive_index(self.default_wavelengths)
 
-        for index, row in events.df.iterrows():
+        for index, row in records.df.iterrows():
             angle_distribution = fennel_angle_distribution_function(
                 energy=row.energy,
                 particle_id=row.particle_id
             )
-            angle_distributions[row.event_id] = angle_distribution(
+            angle_distributions[row.record_id] = angle_distribution(
                 angles,
                 n_photon
             )
 
         for index, row in sources.df.iterrows():
-            source_angle_distributions.append(angle_distributions[row.event_id])
+            source_angle_distributions.append(angle_distributions[row.record_id])
 
         return jnp.array(source_angle_distributions)
 
     def propagate(
             self,
-            events: EventRecords,
-            sources: SourceRecords,
+            records: EventRecords,
+            sources: Sources,
             seed: int = 1337
     ) -> Hits:
+        hits_list = []
         number_of_sources = len(sources)
         number_of_pmts = len(self.detector)
 
@@ -349,7 +347,7 @@ class MockPhotonPropagator(AbstractPhotonPropagator):
         pmt_to_source_distances = jnp.linalg.norm(pmt_to_source, axis=2)
 
         source_angle_distributions = self._get_angle_distributions(
-            events=events,
+            records=records,
             sources=sources
         )
 
@@ -387,10 +385,6 @@ class MockPhotonPropagator(AbstractPhotonPropagator):
         # 5. Distribute Yield using Gamma distribution
         iterator = np.nditer(photons_per_pmt_per_source, flags=['multi_index'])
 
-        hit_list = []
-
-        # TODO: Speed Up
-
         for _ in iterator:
             pmt_index, source_index = iterator.multi_index
             photons = photons_per_pmt_per_source[pmt_index][source_index]
@@ -405,19 +399,15 @@ class MockPhotonPropagator(AbstractPhotonPropagator):
                 1.0,
                 photons
             )
-            hit_list += map(
-                lambda x: {
-                    'event_id': int(sources.df.iloc[source_index]['event_id']),
-                    'string_id': string_id,
-                    'module_id': module_id,
-                    'pmt_id': pmt_id,
-                    'time': x
-                },
-                hit_times
-            )
+            records_hits_df = pd.DataFrame({
+                'time': hit_times
+            }               )
+            records_hits_df['string_id'] = string_id
+            records_hits_df['module_id'] = module_id
+            records_hits_df['pmt_id'] = pmt_id
+            records_hits_df['record_id'] = sources.df.loc[source_index]['record_id']
 
-        hits_df = pd.DataFrame(hit_list)
-        hits_df.head()
-        hits = Hits(df=hits_df)
+            hits = Hits(df=records_hits_df)
+            hits_list.append(hits)
 
-        return hits
+        return Hits.concat(hits_list)

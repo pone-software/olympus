@@ -1,5 +1,5 @@
 """Light yield calculation."""
-from typing import Callable, Tuple
+from typing import Callable
 
 import jax
 import jax.numpy as jnp
@@ -8,11 +8,10 @@ from fennel import Fennel, config
 from jax import random
 
 from ..utils import rotate_to_new_direc_v
-from .constants import Constants
+from ..constants import Constants
 
 config["general"]["jax"] = True
 fennel_instance = Fennel()
-
 
 
 def simple_cascade_light_yield(energy, *args):
@@ -27,6 +26,7 @@ def simple_cascade_light_yield(energy, *args):
 
     return energy * photons_per_GeV
 
+
 def fennel_angle_distribution_function(energy: float, particle_id: int) -> Callable:
     """Fetches the angle distribution function for a given energy and particle.
 
@@ -40,7 +40,6 @@ def fennel_angle_distribution_function(energy: float, particle_id: int) -> Calla
     funcs = fennel_instance.auto_yields(energy, particle_id, function=True)
     angles_func = funcs[5]
     return angles_func
-
 
 
 def fennel_total_light_yield(energy, particle_id, wavelength_range):

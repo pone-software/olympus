@@ -7,15 +7,12 @@ from jax import random
 from ..event_generation.event_generation import (
     generate_cascade,
     generate_muon_energy_losses,
-    generate_realistic_track,
     simulate_noise,
     make_double_casc_source,
-    make_single_casc_source,
 )
 from ..event_generation.utils import proposal_setup, sph_to_cart_jnp
 from ..utils import rotate_to_new_direc_v
-from ..event_generation.constants import Constants
-from functools import partial
+from olympus.constants import Constants
 
 
 def pad_event(array):

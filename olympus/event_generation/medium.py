@@ -1,12 +1,9 @@
-import numpy as np
 from enum import Enum
 
 import numpy.typing as npt
-import jax.numpy as jnp
 
 from hyperion.constants import Constants
 from hyperion.medium import medium_collections
-from olympus.event_generation.lightyield import fennel_angle_distribution_function
 
 
 class MediumEstimationVariant(Enum):

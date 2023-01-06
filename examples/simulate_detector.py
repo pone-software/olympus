@@ -1,20 +1,14 @@
-import json
 import os
-
-import numpy as np
 
 from ananke.configurations.detector import DetectorConfiguration
 from ananke.services.detector import DetectorBuilderService
-from hyperion.constants import Constants
-from hyperion.medium import medium_collections
-from olympus.event_generation.generators import GeneratorCollection, GeneratorFactory
+from olympus.event_generation.generators import CascadeGenerator
 from olympus.event_generation.medium import MediumEstimationVariant, Medium
 from olympus.event_generation.photon_propagation.mock_photons import MockPhotonPropagator
+from olympus.event_generation.photon_propagation.norm_flow_photons import NormalFlowPhotonPropagator
 
 os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.5"
 
-
-rng = np.random.RandomState(31338)
 oms_per_line = 20
 dist_z = 50  # m
 dark_noise_rate = 16 * 1e-5  # 1/ns
@@ -59,7 +53,7 @@ medium = Medium(MediumEstimationVariant.PONE_OPTIMISTIC)
 #     detector=det,
 #     shape_model_path="../../hyperion/data/photon_arrival_time_nflow_params.pickle",
 #     counts_model_path="../../hyperion/data/photon_arrival_time_counts_params.pickle",
-#     c_medium=c_medium_f(700) / 1e9
+#     medium=medium
 # )
 photon_propagator = MockPhotonPropagator(
     detector=det,
@@ -67,34 +61,16 @@ photon_propagator = MockPhotonPropagator(
     angle_resolution=18000,
 )
 
-generator_factory = GeneratorFactory(det, photon_propagator)
-
-cascades_generator = generator_factory.create(
-    "cascade", particle_id=11, log_minimal_energy=2, log_maximal_energy=5.5, rate=0.05
-)
-
-cascades_generator2 = generator_factory.create(
-    "cascade", particle_id=11, log_minimal_energy=4, log_maximal_energy=5.5, rate=0.01
-)
-
-# noise_generator = generator_factory.create("noise")
-
-track_generator = generator_factory.create(
-    'track',
+cascade_generator = CascadeGenerator(
+    detector=det,
+    particle_id=11,
     log_minimal_energy=2,
-    log_maximal_energy=5.5,
-    rate=0.02
+    log_maximal_energy=5,
+    photon_propagator=photon_propagator
 )
 
-generator_collection = GeneratorCollection(detector=det)
+collection = cascade_generator.generate(1)
 
-# generator_collection.add_generator(track_generator)
-generator_collection.add_generator(cascades_generator)
-# generator_collection.add_generator(cascades_generator2)
-# generator_collection.add_generator(noise_generator)
-
-event_collection = generator_collection.generate(
-    n_samples=1
-)
+collection.hits.df.head()
 
 #pickle.dump(event_collection, open('./dataset/test', "wb"))

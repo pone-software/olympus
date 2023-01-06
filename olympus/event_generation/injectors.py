@@ -5,7 +5,7 @@ import numpy as np
 
 from ananke.models.geometry import Vectors3D
 from ananke.models.detector import Detector
-from .constants import defaults
+from olympus.constants import defaults
 
 
 class AbstractInjector(ABC):

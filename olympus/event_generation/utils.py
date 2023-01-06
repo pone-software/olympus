@@ -3,9 +3,8 @@ import logging
 
 import jax.numpy as jnp
 import numpy as np
-from scipy.integrate import quad
 
-from .constants import Constants
+from ..constants import Constants
 
 logger = logging.getLogger(__name__)
 

@@ -2,10 +2,10 @@
 from abc import ABC, abstractmethod
 
 import numpy as np
-from numpy.random import Generator
 
 from ananke.models.detector import Detector
-from ananke.models.event import SourceRecords, Hits, EventRecords
+from ananke.models.event import Sources, Hits, Records
+from olympus.constants import defaults
 from olympus.event_generation.medium import Medium
 
 
@@ -16,7 +16,8 @@ class AbstractPhotonPropagator(ABC):
             self,
             detector: Detector,
             medium: Medium,
-            seed: int = 1337,
+            seed: int = defaults['seed'],
+            default_wavelength: float = 450,
             **kwargs
     ) -> None:
         """Constructor already saving the detector.
@@ -29,19 +30,21 @@ class AbstractPhotonPropagator(ABC):
         super().__init__(**kwargs)
         self.detector = detector
         self.medium = medium
+        self.default_wavelengths = default_wavelength
+        self.seed = seed
         self.rng = np.random.default_rng(seed)
 
     @abstractmethod
     def propagate(
             self,
-            events: EventRecords,
-            sources: SourceRecords,
+            records: Records,
+            sources: Sources,
             **kwargs
     ) -> Hits:
         """Propagates photon source towards the detector.
 
         Args:
-            events: events of sources to propagate
+            records: events of sources to propagate
             sources: photon source to propagate
 
         Returns:
