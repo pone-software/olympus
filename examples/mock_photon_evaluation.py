@@ -1,6 +1,17 @@
 import numpy as np
 import pandas as pd
 
+import os
+
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"  # add this
+# os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "\"platform\""
+
+import jax
+import jax.numpy as jnp
+
+# Global flag to set a specific platform, must be used at startup.
+# jax.config.update('jax_platform_name', 'cpu')
+
 from ananke.configurations.detector import DetectorConfiguration
 from ananke.models.detector import Detector
 from ananke.models.geometry import Vectors3D
@@ -142,7 +153,7 @@ detector = Detector.concat([
 ])
 len(detector.df.index)
 
-number_of_steps = 18
+number_of_steps = 1
 spherical_orientations = np.zeros((number_of_steps, 3))
 
 spherical_orientations[:, 0] = 1
@@ -166,7 +177,7 @@ events_df['particle_id'] = 11
 events_df['type'] = 'cascade'
 
 sources_df['type'] = 'cherenkov'
-sources_df['number_of_photons'] = 1000000
+sources_df['number_of_photons'] = 100000
 
 event_records = EventRecords(df=events_df)
 sources = Sources(df=sources_df)
