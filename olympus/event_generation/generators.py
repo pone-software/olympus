@@ -31,7 +31,7 @@ class EventGenerator(AbstractGenerator):
             particle_id: int,
             injector: AbstractInjector,
             propagator: AbstractPropagator,
-            photon_propagator: AbstractPhotonPropagator,
+            photon_propagator: AbstractPhotonPropagator = None,
             spectrum: Optional[AbstractSpectrum] = None,
             *args,
             **kwargs
@@ -56,6 +56,8 @@ class EventGenerator(AbstractGenerator):
         """Generate realistic muon tracks."""
         records = self.generate_records(number_of_samples)
         sources = self.propagate(records)
+        if self.photon_propagator is None:
+            raise ValueError('Photon Propagator is not defined')
         hits = self.photon_propagator.propagate(records, sources)
 
         collection = Collection(
