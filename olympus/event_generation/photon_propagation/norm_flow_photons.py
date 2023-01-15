@@ -761,6 +761,9 @@ class NormalFlowPhotonPropagator(AbstractPhotonPropagator):
         number_pmts_range = range(number_pmts)
         for index, record in records.df.iterrows():
             source_records = Sources(df=sources.df.loc[sources.df.record_id == record.record_id])
+            if len(source_records) == 0:
+                hits_list.append(Hits())
+                continue
             hits = self.generate_norm_flow_photons(
                 self.detector.module_locations.to_numpy(dtype=np.float32),
                 self.detector.pmt_efficiencies.to_numpy(dtype=np.float32),

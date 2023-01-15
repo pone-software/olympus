@@ -1,10 +1,12 @@
 """Module containing code for mock photon source propagation."""
-from typing import Union, Tuple
+from multiprocessing import Pool
+from typing import Union, Tuple, List
 
 import numpy as np
 import numpy.typing as npt
 import jax.numpy as jnp
 import pandas as pd
+import logging
 
 from ananke.models.detector import Detector
 from ananke.models.event import Sources, Hits, EventRecords
@@ -12,6 +14,42 @@ from olympus.event_generation.lightyield import fennel_angle_distribution_functi
 from olympus.event_generation.medium import Medium
 from olympus.event_generation.photon_propagation.interface import \
     AbstractPhotonPropagator
+
+
+def func(record_id, pmt_photons, pmt_times, pmt_indices, rng) -> Hits:
+    logging.log(logging.INFO,
+                "Processed PMT {} for Record {}".format(
+                    pmt_indices, record_id
+                ))
+
+    hit_times = []
+
+    for index, photons in enumerate(pmt_photons):
+        if photons == 0:
+            continue
+        # TODO: Check passing of RNG generator
+        # TODO: Flatten everything
+        hit_times.append(rng.gamma(
+            pmt_times[index],
+            1.0,
+            photons
+        ))
+
+    string_id = pmt_indices[0]
+    module_id = pmt_indices[1]
+    pmt_id = pmt_indices[2]
+    records_hits_df = pd.DataFrame(
+        {
+            'time': hit_times
+        }
+    )
+
+    records_hits_df['string_id'] = string_id
+    records_hits_df['module_id'] = module_id
+    records_hits_df['pmt_id'] = pmt_id
+    records_hits_df['record_id'] = record_id
+
+    return Hits(df=records_hits_df)
 
 
 def unit_vector(
@@ -250,7 +288,7 @@ class MockPhotonPropagator(AbstractPhotonPropagator):
             number_of_modules: int,
             number_of_sources: int,
             source_orientations: jnp.ndarray,
-            source_angle_distributions: jnp.ndarray,
+            source_angle_distribution: jnp.ndarray,
             pmt_to_source: jnp.ndarray,
             pmt_to_source_distances: jnp.ndarray,
     ) -> jnp.ndarray:
@@ -279,7 +317,7 @@ class MockPhotonPropagator(AbstractPhotonPropagator):
         ).astype('int16')
         # Get Angular distribution values for each pmt
         angular_distribution_per_pmt = jnp.take(
-            jnp.tile(source_angle_distributions, (number_of_modules, 1, 1)),
+            jnp.tile(source_angle_distribution, (number_of_modules, 1)),
             angle_indices
         )
         ellipsis_mask = self.__get_ellipsis_mask(
@@ -295,7 +333,8 @@ class MockPhotonPropagator(AbstractPhotonPropagator):
             '...ij,...i->...',
             ellipsis_mask,
             angular_distribution_per_pmt
-        ) * jnp.square(180 / self.angle_resolution)  # r**2
+        )
+        # TODO: Check Integral
 
         # we only have yield at pmts facing the source
         mask_condition = (pmt_to_source_angles < jnp.pi / 2).astype('int16')
@@ -316,131 +355,123 @@ class MockPhotonPropagator(AbstractPhotonPropagator):
 
         return jnp.exp(-1.0 * jnp.divide(pmt_to_source_distances, absorption_length))
 
-    def _get_angle_distributions(
-            self, records: EventRecords, sources: Sources
+    def _get_angle_distribution(
+            self, energy: float, particle_id: int
     ) -> jnp.ndarray:
-        angle_distributions = {}
-        source_angle_distributions = []
 
         angles = jnp.linspace(0, 180, self.angle_resolution)
         n_photon = self.medium.get_refractive_index(self.default_wavelengths)
+        angle_distribution = fennel_angle_distribution_function(
+            energy=energy,
+            particle_id=particle_id
+        )
+        source_angle_distribution = angle_distribution(
+            angles,
+            n_photon
+        )
 
-        for index, row in records.df.iterrows():
-            angle_distribution = fennel_angle_distribution_function(
-                energy=row.energy,
-                particle_id=row.particle_id
-            )
-            angle_distributions[row.record_id] = angle_distribution(
-                angles,
-                n_photon
-            )
+        source_angle_distribution = jnp.array(source_angle_distribution)
 
-        for index, row in sources.df.iterrows():
-            source_angle_distributions.append(angle_distributions[row.record_id])
+        # norm all angle distributions according to a cylinder
+        normation_factor = jnp.sum(source_angle_distribution)
+        normation_factor = normation_factor * self.angle_resolution
 
-        return jnp.array(source_angle_distributions)
+        source_angle_distribution = jnp.divide(source_angle_distribution, normation_factor)
+
+        return source_angle_distribution
 
     def propagate(
             self,
             records: EventRecords,
             sources: Sources,
             seed: int = 1337,
-            return_photon_counts: bool = False
+            use_multiprocessing: bool = True
     ) -> Union[Hits, Tuple[Hits, jnp.array]]:
+        if len(sources) == 0:
+            return Hits()
         hits_list = []
-        number_of_sources = len(sources)
-        number_of_pmts = len(self.detector)
+        for record_index, record in records.df.iterrows():
+            record_sources = sources.get_by_record(record.record_id)
+            number_of_sources = len(record_sources)
+            number_of_pmts = len(self.detector)
 
-        source_locations = sources.locations.to_numpy(np.float32)
-        source_locations = jnp.array(source_locations)
+            source_locations = record_sources.locations.to_numpy(np.float32)
+            source_locations = jnp.array(source_locations)
 
-        source_orientations = sources.orientations.to_numpy(np.float32)
-        source_orientations = jnp.array(source_orientations)
+            source_orientations = record_sources.orientations.to_numpy(np.float32)
+            source_orientations = jnp.array(source_orientations)
 
-        source_photons = sources.number_of_photons.to_numpy(np.float32)
-        source_photons = jnp.array(source_photons)
+            source_photons = record_sources.number_of_photons.to_numpy(np.float32)
+            source_photons = jnp.array(source_photons)
 
-        source_times = sources.times.to_numpy(np.float32)
-        source_times = jnp.array(source_times)
+            source_times = record_sources.times.to_numpy(np.float32)
+            source_times = jnp.array(source_times)
 
-        # 1. Calculate angle between PMT and Source direction
-        expanded_pmt_positions = jnp.tile(
-            jnp.expand_dims(self.pmt_positions, axis=1),
-            (1, number_of_sources, 1)
-        )
-        pmt_to_source = source_locations - expanded_pmt_positions
-        pmt_to_source_distances = jnp.linalg.norm(pmt_to_source, axis=2)
-
-        source_angle_distributions = self._get_angle_distributions(
-            records=records,
-            sources=sources
-        )
-
-        # 2. Mask sources in direction of PMT (180°)
-        angular_yield = self.__calculate_angular_yield(
-            number_of_modules=number_of_pmts,
-            number_of_sources=number_of_sources,
-            source_orientations=source_orientations,
-            pmt_to_source=pmt_to_source,
-            source_angle_distributions=source_angle_distributions,
-            pmt_to_source_distances=pmt_to_source_distances
-        )
-        # 3. Calculate Yield based on distance
-        distance_yield = self.__calculate_distance_yield(
-            pmt_to_source_distances=pmt_to_source_distances
-        )
-
-        # 4. Calculate Yield based on PMT Efficiency
-        efficiency_yield = self.pmt_efficiencies
-
-        # 4. Calculate Number of Photons
-        total_yield = jnp.multiply(angular_yield, distance_yield)
-        total_yield = jnp.multiply(total_yield, efficiency_yield)
-        photons_per_pmt_per_source = jnp.multiply(total_yield, source_photons.T)
-        photons_per_pmt_per_source = jnp.rint(photons_per_pmt_per_source).astype(
-            'int16'
-        )
-
-        # 5. Calculate Arrival Time
-        travel_time = pmt_to_source_distances / self.medium.get_c_medium_photons(
-            self.default_wavelengths
-        )
-        times_per_pmt_per_source = jnp.add(travel_time, source_times.T)
-
-        # 5. Distribute Yield using Gamma distribution
-        iterator = np.nditer(photons_per_pmt_per_source, flags=['multi_index'])
-
-        # TODO: MultiThread
-        for _ in iterator:
-            pmt_index, source_index = iterator.multi_index
-            photons = photons_per_pmt_per_source[pmt_index][source_index]
-            if photons == 0:
-                continue
-            indices = self.pmt_indices.iloc[pmt_index]
-            string_id = indices[0]
-            module_id = indices[1]
-            pmt_id = indices[2]
-            hit_times = self.rng.gamma(
-                times_per_pmt_per_source[pmt_index][source_index],
-                1.0,
-                photons
+            # 1. Calculate angle between PMT and Source direction
+            expanded_pmt_positions = jnp.tile(
+                jnp.expand_dims(self.pmt_positions, axis=1),
+                (1, number_of_sources, 1)
             )
-            records_hits_df = pd.DataFrame(
-                {
-                    'time': hit_times
-                }
-            )
-            records_hits_df['string_id'] = string_id
-            records_hits_df['module_id'] = module_id
-            records_hits_df['pmt_id'] = pmt_id
-            records_hits_df['record_id'] = sources.df.loc[source_index]['record_id']
+            pmt_to_source = source_locations - expanded_pmt_positions
+            pmt_to_source_distances = jnp.linalg.norm(pmt_to_source, axis=2)
 
-            hits = Hits(df=records_hits_df)
-            hits_list.append(hits)
+            source_angle_distribution = self._get_angle_distribution(
+                energy=record.energy,
+                particle_id=record.particle_id
+            )
+
+            # 2. Mask sources in direction of PMT (180°)
+            angular_yield = self.__calculate_angular_yield(
+                number_of_modules=number_of_pmts,
+                number_of_sources=number_of_sources,
+                source_orientations=source_orientations,
+                pmt_to_source=pmt_to_source,
+                source_angle_distribution=source_angle_distribution,
+                pmt_to_source_distances=pmt_to_source_distances
+            )
+            # 3. Calculate Yield based on distance
+            distance_yield = self.__calculate_distance_yield(
+                pmt_to_source_distances=pmt_to_source_distances
+            )
+
+            # 4. Calculate Yield based on PMT Efficiency
+            efficiency_yield = self.pmt_efficiencies
+
+            # 4. Calculate Number of Photons
+            total_yield = jnp.multiply(angular_yield, distance_yield)
+            total_yield = jnp.multiply(total_yield, efficiency_yield)
+            photons_per_pmt_per_source = jnp.multiply(total_yield, source_photons.T)
+            photons_per_pmt_per_source = jnp.rint(photons_per_pmt_per_source).astype(
+                'int16'
+            )
+
+            # 5. Calculate Arrival Time
+            travel_time = pmt_to_source_distances / self.medium.get_c_medium_photons(
+                self.default_wavelengths
+            )
+            times_per_pmt_per_source = jnp.add(travel_time, source_times.T)
+
+            # 5. Distribute Yield using Gamma distribution
+
+            multiprocessing_args = []
+
+            for pmt_index, pmt_photons in enumerate(photons_per_pmt_per_source):
+                if jnp.max(pmt_photons) > 0:
+                    multiprocessing_args.append((
+                        record.record_id,
+                        pmt_photons,
+                        times_per_pmt_per_source[pmt_index],
+                        self.pmt_indices.iloc[pmt_index],
+                        self.rng
+                    ))
+
+            if not use_multiprocessing:
+                for args in multiprocessing_args:
+                    hits_list += func(*args)
+            else:
+                with Pool() as pool:
+                    hits_list += pool.starmap(func, multiprocessing_args)
 
         all_hits = Hits.concat(hits_list)
-
-        if return_photon_counts:
-            return all_hits, photons_per_pmt_per_source
 
         return all_hits
