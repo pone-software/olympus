@@ -16,11 +16,38 @@ from olympus.event_generation.photon_propagation.interface import \
     AbstractPhotonPropagator
 
 
-def func(record_id, pmt_photons, pmt_times, pmt_indices, rng) -> Hits:
-    logging.log(logging.INFO,
-                "Processed PMT {} for Record {}".format(
-                    pmt_indices, record_id
-                ))
+def photons_per_pmt_to_hits(
+        record_id: int,
+        pmt_photons: jnp.ndarray,
+        pmt_times: jnp.ndarray,
+        angular_yield: jnp.ndarray,
+        pmt_indices: Tuple[int, int, int],
+        rng: np.random.BitGenerator
+) -> Hits:
+    """Transforms all the sources of one PMT to hits for that PMT.
+
+    Args:
+        record_id: ID of the used record
+        pmt_photons: List with number of photons per source
+        pmt_times: List with times per source and photons
+        angular_yield: Yield of sources dependent on angle for gamma distribution
+        pmt_indices: Indices of the current PMT
+        rng: Random number generator
+
+    Returns:
+        All hits for the current PMT
+    """
+    logging.log(
+        logging.INFO,
+        "Processed PMT {} for Record {}".format(
+            pmt_indices, record_id
+        )
+    )
+
+    # TODO: Verify the distributions look nice
+    gamma_a_basis = 2.
+    gamma_b_basis = 2.
+    scaled_angular = angular_yield * 1E4
 
     hit_times = []
 
@@ -29,11 +56,12 @@ def func(record_id, pmt_photons, pmt_times, pmt_indices, rng) -> Hits:
             continue
         # TODO: Check passing of RNG generator
         # TODO: Flatten everything
-        hit_times.append(rng.gamma(
-            pmt_times[index],
-            1.0,
+        distribution = rng.gamma(
+            gamma_a_basis - scaled_angular[index],
+            gamma_b_basis - scaled_angular[index],
             photons
-        ))
+        ) + pmt_times[index]
+        hit_times += list(distribution)
 
     string_id = pmt_indices[0]
     module_id = pmt_indices[1]
@@ -376,7 +404,10 @@ class MockPhotonPropagator(AbstractPhotonPropagator):
         normation_factor = jnp.sum(source_angle_distribution)
         normation_factor = normation_factor * self.angle_resolution
 
-        source_angle_distribution = jnp.divide(source_angle_distribution, normation_factor)
+        source_angle_distribution = jnp.divide(
+            source_angle_distribution,
+            normation_factor
+        )
 
         return source_angle_distribution
 
@@ -384,7 +415,6 @@ class MockPhotonPropagator(AbstractPhotonPropagator):
             self,
             records: EventRecords,
             sources: Sources,
-            seed: int = 1337,
             use_multiprocessing: bool = True
     ) -> Union[Hits, Tuple[Hits, jnp.array]]:
         if len(sources) == 0:
@@ -394,6 +424,9 @@ class MockPhotonPropagator(AbstractPhotonPropagator):
             record_sources = sources.get_by_record(record.record_id)
             number_of_sources = len(record_sources)
             number_of_pmts = len(self.detector)
+
+            if number_of_sources == 0:
+                continue
 
             source_locations = record_sources.locations.to_numpy(np.float32)
             source_locations = jnp.array(source_locations)
@@ -457,20 +490,26 @@ class MockPhotonPropagator(AbstractPhotonPropagator):
 
             for pmt_index, pmt_photons in enumerate(photons_per_pmt_per_source):
                 if jnp.max(pmt_photons) > 0:
-                    multiprocessing_args.append((
-                        record.record_id,
-                        pmt_photons,
-                        times_per_pmt_per_source[pmt_index],
-                        self.pmt_indices.iloc[pmt_index],
-                        self.rng
-                    ))
+                    multiprocessing_args.append(
+                        (
+                            record.record_id,
+                            pmt_photons,
+                            times_per_pmt_per_source[pmt_index],
+                            angular_yield[pmt_index],
+                            self.pmt_indices.iloc[pmt_index],
+                            self.rng
+                        )
+                    )
 
             if not use_multiprocessing:
                 for args in multiprocessing_args:
-                    hits_list += func(*args)
+                    hits_list.append(photons_per_pmt_to_hits(*args))
             else:
                 with Pool() as pool:
-                    hits_list += pool.starmap(func, multiprocessing_args)
+                    hits_list += pool.starmap(
+                        photons_per_pmt_to_hits,
+                        multiprocessing_args
+                    )
 
         all_hits = Hits.concat(hits_list)
 

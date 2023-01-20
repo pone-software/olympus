@@ -14,7 +14,7 @@ class AbstractInjector(ABC):
             detector: Detector,
             radius_extension: Optional[float] = 50,
             height_extension: Optional[float] = 100,
-            rng: Optional[np.random.RandomState] = defaults['rng'],
+            seed: int = defaults['seed'],
             **kwargs
     ) -> None:
         self.detector = detector
@@ -23,7 +23,7 @@ class AbstractInjector(ABC):
 
         self.cylinder_height = self.detector.outer_cylinder[1] + height_extension
         self.cylinder_radius = self.detector.outer_cylinder[0] + radius_extension
-        self.rng = rng
+        self.rng = np.random.default_rng(seed=seed)
 
     @abstractmethod
     def get_positions(
