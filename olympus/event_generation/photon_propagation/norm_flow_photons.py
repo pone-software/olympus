@@ -1,3 +1,4 @@
+"""Module containing the normal flow photon propagator."""
 import pickle
 from typing import List
 
@@ -5,10 +6,8 @@ import awkward as ak
 import jax
 import jax.numpy as jnp
 import pandas as pd
-from jax.lax import cond
 import numpy as np
 
-from ananke.models.detector import Detector
 from ananke.models.event import Sources, Hits, Records
 from hyperion.models.photon_arrival_time_nflow.net import (
     make_counts_net_fn,
@@ -21,7 +20,7 @@ from jax import random
 
 from .interface import AbstractPhotonPropagator
 from .utils import sources_to_model_input, sources_to_model_input_per_module, bucket_fn
-from ..medium import Medium
+from ...configuration.photon_propagation import NormalFlowPhotonPropagatorConfiguration
 
 
 def make_generate_norm_flow_photons(
@@ -707,14 +706,14 @@ def make_nflow_photon_likelihood(shape_model_path, counts_model_path):
     return eval_likelihood
 
 
-class NormalFlowPhotonPropagator(AbstractPhotonPropagator):
+class NormalFlowPhotonPropagator(
+    AbstractPhotonPropagator[NormalFlowPhotonPropagatorConfiguration]
+):
     """Photon propagator based on the normal flow method."""
 
     def __init__(
             self,
-            shape_model_path: str,
-            counts_model_path: str,
-            padding_base: int = 4,
+            *args,
             **kwargs
     ):
         """
@@ -729,15 +728,15 @@ class NormalFlowPhotonPropagator(AbstractPhotonPropagator):
                 sampling function. bucket_size = padding_base**N
 
         """
-        super().__init__(**kwargs)
+        super().__init__(*args, **kwargs)
 
         c_medium = self.medium.get_c_medium_photons(self.default_wavelengths)
 
         self.generate_norm_flow_photons = make_generate_norm_flow_photons(
-            shape_model_path,
-            counts_model_path,
+            self.configuration.shape_model_path,
+            self.configuration.counts_model_path,
             c_medium,
-            padding_base
+            self.configuration.padding_base
         )
 
     def propagate(
@@ -749,8 +748,8 @@ class NormalFlowPhotonPropagator(AbstractPhotonPropagator):
         """Propagates using the normal flow propagator.
 
         Args:
+            records: Event records to propagate
             sources: Photon source to propagate
-            seed: seed by which to propagate
 
         Returns:
             List of hits containing propagation result
@@ -760,7 +759,9 @@ class NormalFlowPhotonPropagator(AbstractPhotonPropagator):
         number_pmts = len(detector_indices.index)
         number_pmts_range = range(number_pmts)
         for index, record in records.df.iterrows():
-            source_records = Sources(df=sources.df.loc[sources.df.record_id == record.record_id])
+            source_records = Sources(
+                df=sources.df.loc[sources.df.record_id == record.record_id]
+            )
             if len(source_records) == 0:
                 hits_list.append(Hits())
                 continue
@@ -770,18 +771,28 @@ class NormalFlowPhotonPropagator(AbstractPhotonPropagator):
                 source_records.locations.to_numpy(dtype=np.float32),
                 source_records.orientations.to_numpy(dtype=np.float32),
                 np.expand_dims(source_records.times.to_numpy(dtype=np.float32), axis=1),
-                np.expand_dims(source_records.number_of_photons.to_numpy(dtype=np.float32), axis=1),
+                np.expand_dims(
+                    source_records.number_of_photons.to_numpy(dtype=np.float32),
+                    axis=1
+                ),
                 self.seed
             )
+            if len(hits) == 0:
+                continue
             for x in number_pmts_range:
-                hits_df = pd.DataFrame({
-                    'time': hits[x]
-                })
+                if len(hits[x]) == 0:
+                    continue
                 current_indices = detector_indices.iloc[x]
-                hits_df['string_id'] = current_indices.string_id
-                hits_df['module_id'] = current_indices.module_id
-                hits_df['pmt_id'] = current_indices.pmt_id
-                hits_df['record_id'] = record.record_id
+                hits_df = pd.DataFrame(
+                    {
+                        'time': hits[x],
+                        'string_id': current_indices.string_id,
+                        'module_id': current_indices.module_id,
+                        'pmt_id': current_indices.pmt_id,
+                        'record_id': record.record_id,
+                        'type': record.type,
+                    }
+                )
                 hits_per_module = Hits(df=hits_df)
                 hits_list.append(hits_per_module)
 

@@ -2,10 +2,9 @@ import os
 
 from ananke.configurations.detector import DetectorConfiguration
 from ananke.services.detector import DetectorBuilderService
-from olympus.event_generation.generators import CascadeGenerator
+from olympus.event_generation.generators import CascadeEventGenerator
 from olympus.event_generation.medium import MediumEstimationVariant, Medium
 from olympus.event_generation.photon_propagation.mock_photons import MockPhotonPropagator
-from olympus.event_generation.photon_propagation.norm_flow_photons import NormalFlowPhotonPropagator
 
 os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.5"
 
@@ -61,7 +60,7 @@ photon_propagator = MockPhotonPropagator(
     angle_resolution=18000,
 )
 
-cascade_generator = CascadeGenerator(
+cascade_generator = CascadeEventGenerator(
     detector=det,
     particle_id=11,
     log_minimal_energy=2,

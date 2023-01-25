@@ -1,22 +1,47 @@
+"""Modula containing the interface for generators."""
 import uuid
 from abc import ABC, abstractmethod
-from typing import Optional, List
+from typing import List, TypeVar, Generic
 
 import numpy as np
 
+from ananke.models.detector import Detector
 from ananke.models.event import Collection, Records
-from olympus.constants import defaults
+from ananke.schemas.event import RecordType
+from olympus.configuration.generators import GeneratorConfiguration
+
+_GeneratorConfiguration = TypeVar(
+    '_GeneratorConfiguration',
+    bound=GeneratorConfiguration
+)
+
+_GeneratorRecordType = TypeVar(
+    '_GeneratorRecordType',
+    bound=RecordType
+)
 
 
-class AbstractGenerator(ABC):
+class AbstractGenerator(ABC, Generic[_GeneratorConfiguration, _GeneratorRecordType]):
     def __init__(
             self,
-            seed: Optional[int] = defaults["seed"],
-            *args,
-            **kwargs
+            record_type: _GeneratorRecordType,
+            detector: Detector,
+            configuration: _GeneratorConfiguration,
     ):
-        super().__init__()
-        self.rng = np.random.default_rng(seed)
+        """Abstract parent to all detector based generators.
+
+        TODO: Decide whether to include here or in generate method.
+
+        Args:
+            detector: Detector to generate records for.
+            configuration: Configuration of the records to generate.
+        """
+        super(AbstractGenerator, self).__init__()
+
+        self.record_type = record_type
+        self.configuration = configuration
+        self.detector = detector
+        self.rng = np.random.default_rng(configuration.seed)
 
     @abstractmethod
     def generate(
@@ -59,4 +84,3 @@ class AbstractGenerator(ABC):
             List of integer ids.
         """
         return [uuid.uuid1().int >> 64 for x in range(number_of_samples)]
-

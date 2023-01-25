@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Tuple, Any, List
+import logging
 
 import numpy as np
 import numpy.typing as npt
@@ -10,24 +11,23 @@ from ananke.models.event import EventRecords, Sources
 from ananke.models.geometry import Vectors3D
 from ananke.models.detector import Detector
 from ananke.schemas.event import SourceType
-from olympus.constants import defaults
 from .event_generation import generate_muon_energy_losses
 from .lightyield import (
     make_realistic_cascade_source,
 )
 from .utils import proposal_setup
+from ..configuration.generators import EventPropagatorConfiguration
 
-
+# TODO: Configuration only needed for One Propagator
 class AbstractPropagator(ABC):
     def __init__(
             self,
             detector: Detector,
-            name: str,
-            seed: int = defaults['seed'],
-            **kwargs
+            configuration: EventPropagatorConfiguration,
+            seed: int
     ) -> None:
         super().__init__()
-        self.name = name
+        self.configuration = configuration
         self.detector = detector
         self.seed = seed
 
@@ -84,7 +84,10 @@ class AbstractPropagator(ABC):
     def propagate(self, records: EventRecords) -> Sources:
         key, k1, k2 = random.split(random.PRNGKey(self.seed), 3)
 
+
+        logging.info('Starting to propagate {} records'.format(len(records)))
         sources = self._records_to_sources(records=records, k1=k1)
+        logging.info('Finished propagating {} records'.format(len(records)))
 
         return sources
 
@@ -93,11 +96,10 @@ class TrackPropagator(AbstractPropagator):
     def __init__(
             self,
             detector: Detector,
-            name: str = "track",
-            seed: int = defaults['seed'],
-            **kwargs
+            configuration: EventPropagatorConfiguration,
+            seed: int
     ) -> None:
-        super().__init__(detector, name, seed, **kwargs)
+        super().__init__(detector=detector, configuration=configuration, seed=seed)
         self.proposal_propagator = proposal_setup()
 
     def _records_to_sources(self, records: EventRecords, k1: str) -> Sources:
@@ -127,18 +129,11 @@ class CascadePropagator(AbstractPropagator):
     def __init__(
             self,
             detector: Detector,
-            name: str = "cascade",
-            seed: int = defaults['seed'],
-            resolution: float = 0.2,
-            **kwargs
+            configuration: EventPropagatorConfiguration,
+            seed: int
     ) -> None:
-        super().__init__(
-            detector=detector,
-            seed=seed,
-            name=name,
-            **kwargs
-        )
-        self.resolution = resolution
+        super().__init__(detector=detector, configuration=configuration, seed=seed)
+        self.resolution = configuration.resolution
 
     def _records_to_sources(self, records: EventRecords, k1: str) -> Sources:
         source_records: List[Sources] = []
@@ -180,18 +175,10 @@ class StartingTrackPropagator(TrackPropagator, CascadePropagator):
     def __init__(
             self,
             detector: Detector,
-            name: str = "track_starting",
-            seed: int = defaults['seed'],
-            resolution: float = 0.2,
-            **kwargs
+            configuration: EventPropagatorConfiguration,
+            seed: int
     ) -> None:
-        super(StartingTrackPropagator, self).__init__(
-            detector=detector,
-            name=name,
-            seed=seed,
-            resolution=resolution,
-            **kwargs
-        )
+        super().__init__(detector=detector, configuration=configuration, seed=seed)
         self.rng = np.random.default_rng(seed)
 
     def propagate(self, event_records: EventRecords) -> Sources:

@@ -1,6 +1,7 @@
-import uuid
+"""Module containing all event generators."""
+import logging
 from abc import ABC
-from typing import Optional, Type, List
+from typing import Type, Dict, Any
 
 import pandas as pd
 import numpy as np
@@ -14,55 +15,66 @@ from ananke.models.event import (
     Hits,
 )
 from ananke.models.geometry import Vectors3D
-from ananke.schemas.event import EventType, NoiseType
+from ananke.schemas.event import EventType, NoiseType, RecordType
 from .detector import sample_direction
 from .injectors import (
     AbstractInjector,
     SurfaceInjector,
     VolumeInjector,
 )
-from .photon_propagation.interface import AbstractPhotonPropagator
+from .photon_propagation.factory import get_photon_propagator
 from .propagators import (
     AbstractPropagator,
     CascadePropagator,
     StartingTrackPropagator,
     TrackPropagator,
 )
-from .spectra import AbstractSpectrum, UniformSpectrum
+from .spectra import UniformSpectrum
+from ..configuration.generators import (
+    EventGeneratorConfiguration,
+    NoiseGeneratorConfiguration,
+    GeneratorConfiguration,
+    GenerationConfiguration,
+)
 from ..generators import AbstractGenerator
-from ..constants import defaults
 
 
-class EventGenerator(AbstractGenerator):
+class EventGenerator(AbstractGenerator[EventGeneratorConfiguration, EventType]):
     def __init__(
             self,
-            event_type: EventType,
-            particle_id: int,
-            injector: AbstractInjector,
-            propagator: AbstractPropagator,
-            photon_propagator: AbstractPhotonPropagator = None,
-            spectrum: Optional[AbstractSpectrum] = None,
+            injector: Type[AbstractInjector],
+            propagator: Type[AbstractPropagator],
             *args,
             **kwargs
     ) -> None:
-        super().__init__(*args, **kwargs)
-        self.injector = injector
-        if spectrum is None:
-            spectrum = UniformSpectrum(
-                log_maximal_energy=kwargs["log_maximal_energy"],
-                log_minimal_energy=kwargs["log_minimal_energy"],
-            )
-        self.spectrum = spectrum
-        self.propagator = propagator
-        self.photon_propagator = photon_propagator
-        self.event_type = event_type
-        self.particle_id = particle_id
+        super().__init__(
+            *args,
+            **kwargs
+        )
+        self.injector = injector(detector=self.detector)
+        self.spectrum = UniformSpectrum(
+            log_maximal_energy=self.configuration.spectrum.log_maximal_energy,
+            log_minimal_energy=self.configuration.spectrum.log_minimal_energy,
+            seed=self.configuration.seed
+        )
+        self.propagator = propagator(
+            detector=self.detector,
+            configuration=self.configuration.event_propagator,
+            seed=self.configuration.seed
+        )
+        self.photon_propagator = get_photon_propagator(
+            detector=self.detector,
+            configuration=self.configuration.source_propagator
+        )
+        self.particle_id = self.configuration.particle_id
 
     def generate(
             self,
             number_of_samples: int
     ) -> Collection:
         """Generate realistic muon tracks."""
+
+        logging.info('Starting to generate {} samples'.format(number_of_samples))
         records = self.generate_records(number_of_samples)
         sources = self.propagate(records)
         if self.photon_propagator is None:
@@ -78,8 +90,8 @@ class EventGenerator(AbstractGenerator):
 
         return collection
 
-    def generate_records(self, number_of_samples) -> EventRecords:
-
+    def generate_records(self, number_of_samples: int) -> EventRecords:
+        logging.info('Starting to generate {} records'.format(number_of_samples))
         track_length = 3000
 
         locations = self.injector.get_positions(n=number_of_samples)
@@ -99,12 +111,12 @@ class EventGenerator(AbstractGenerator):
         event_records_df['record_id'] = ids
         event_records_df['energy'] = energies
         event_records_df['length'] = track_length
-        # TODO: Make flexible start time possible
-        event_records_df['time'] = 0
-        event_records_df['type'] = self.event_type.value
+        event_records_df['time'] = self.configuration.start_time
+        event_records_df['type'] = self.record_type.value
         event_records_df['particle_id'] = self.particle_id
 
         event_records = EventRecords(df=event_records_df)
+        logging.info('Finished to generating {} records'.format(number_of_samples))
 
         return event_records
 
@@ -112,68 +124,59 @@ class EventGenerator(AbstractGenerator):
         return self.propagator.propagate(records=records)
 
 
-class CascadeGenerator(EventGenerator):
+class CascadeEventGenerator(EventGenerator):
     def __init__(
             self,
-            detector: Detector,
             *args,
             **kwargs
     ):
-        injector = VolumeInjector(detector=detector, **kwargs)
-        propagator = CascadePropagator(
-            detector=detector, **kwargs
-        )
+        injector = VolumeInjector
+        propagator = CascadePropagator
         super().__init__(
-            event_type=EventType.CASCADE,
-            injector=injector, propagator=propagator, *args, **kwargs
+            *args,
+            **kwargs,
+            injector=injector,
+            propagator=propagator
         )
 
 
 class TrackEventGenerator(EventGenerator):
     def __init__(
-            self, detector: Detector,
+            self,
             *args,
             **kwargs
     ):
-        injector = SurfaceInjector(detector=detector, **kwargs)
-        spectrum = UniformSpectrum(
-            log_maximal_energy=kwargs["log_maximal_energy"],
-            log_minimal_energy=kwargs["log_minimal_energy"],
-        )
-        propagator = TrackPropagator(
-            detector=detector, **kwargs
-        )
+        injector = SurfaceInjector
+        propagator = TrackPropagator
         super().__init__(
-            event_type=EventType.REALISTIC_TRACK,
-            injector=injector, spectrum=spectrum, propagator=propagator, *args, **kwargs
+            *args,
+            **kwargs,
+            injector=injector,
+            propagator=propagator
         )
 
 
 class StartingTrackEventGenerator(EventGenerator):
     def __init__(
-            self, detector: Detector,
+            self,
             *args,
             **kwargs
     ):
-        injector = VolumeInjector(detector=detector, **kwargs)
-        propagator = StartingTrackPropagator(
-            detector=detector, **kwargs
-        )
+        injector = VolumeInjector
+        propagator = StartingTrackPropagator
         super().__init__(
-            event_type=EventType.STARTING_TRACK,
-            injector=injector, propagator=propagator, *args, **kwargs
+            *args,
+            **kwargs,
+            injector=injector,
+            propagator=propagator
         )
 
 
-class NoiseGenerator(AbstractGenerator, ABC):
-    """Abstract parent for all Noise Generators"""
+class NoiseGenerator(AbstractGenerator[NoiseGeneratorConfiguration, NoiseType], ABC):
+    """Abstract parent for all Noise Generators."""
 
     def __init__(
             self,
-            noise_type: NoiseType,
-            detector: Detector,
-            start_time: int,
-            duration: int,
             *args,
             **kwargs
     ):
@@ -185,11 +188,11 @@ class NoiseGenerator(AbstractGenerator, ABC):
             start_time: start time of the noise
             duration: duration of the noise
         """
-        super().__init__(*args, **kwargs)
-        self.noise_type = noise_type
-        self.detector = detector
-        self.start_time = start_time
-        self.duration = duration
+        super().__init__(
+            *args, **kwargs
+        )
+        self.start_time = self.configuration.start_time
+        self.duration = self.configuration.duration
 
     def generate_records(self, number_of_samples: int) -> NoiseRecords:
         """Generic generator of noise records.
@@ -210,7 +213,7 @@ class NoiseGenerator(AbstractGenerator, ABC):
 
         noise_records_df['time'] = self.start_time
         noise_records_df['duration'] = self.duration
-        noise_records_df['type'] = self.noise_type.value
+        noise_records_df['type'] = self.record_type
 
         noise_records = NoiseRecords(df=noise_records_df)
 
@@ -226,7 +229,7 @@ class ElectronicNoiseGenerator(NoiseGenerator):
             **kwargs
     ):
         """Constructor of the Electronic Noise."""
-        super().__init__(noise_type=NoiseType.ELECTRICAL, *args, **kwargs)
+        super().__init__(record_type=NoiseType.ELECTRICAL, *args, **kwargs)
 
     def _generate_hits(self, records: NoiseRecords) -> Hits:
         """Generates hits based on noise records.
@@ -281,6 +284,7 @@ class ElectronicNoiseGenerator(NoiseGenerator):
             hits_df.iloc[current_slice, module_id_loc] = current_pmt['module_id']
             hits_df.iloc[current_slice, string_id_loc] = current_pmt['string_id']
             hits_df.iloc[current_slice, record_id_loc] = current_record['record_id']
+            hits_df.iloc[current_slice, record_id_loc] = current_record['type']
             hits_index += nop_per_pmt_and_record
 
         return Hits(df=hits_df)
@@ -305,49 +309,36 @@ class ElectronicNoiseGenerator(NoiseGenerator):
         return collection
 
 
-class GeneratorFactory:
-    def __init__(
-            self,
-            detector: Detector,
-            seed: int = defaults['seed'],
-            photon_propagator: AbstractPhotonPropagator = None
-    ) -> None:
-        self._builders = {
-            "track": TrackEventGenerator,
-            "starting_track": StartingTrackEventGenerator,
-            "cascade": CascadeGenerator,
-            # "noise": RandomNoiseGenerator
-        }
-        self.detector = detector
-        self.photon_propagator = photon_propagator
-        self.seed = seed
+generators: Dict[Any, Type[AbstractGenerator]] = {
+    EventType.REALISTIC_TRACK: TrackEventGenerator,
+    EventType.STARTING_TRACK: StartingTrackEventGenerator,
+    EventType.CASCADE: CascadeEventGenerator,
+    NoiseType.ELECTRICAL: ElectronicNoiseGenerator,
+}
 
-    def register_builder(self, key: str, builder: Type[AbstractGenerator]):
-        self._builders[key] = builder
 
-    def create(self, key, **kwargs) -> AbstractGenerator:
-        builder = self._builders.get(key)
-        if not builder:
-            raise ValueError(key)
-        return builder(
-            detector=self.detector,
-            photon_propagator=self.photon_propagator,
-            seed=self.seed,
-            **kwargs
+def get_generator(
+        detector: Detector,
+        configuration: GeneratorConfiguration
+) -> AbstractGenerator:
+    try:
+        generator_class: Type[AbstractGenerator] = generators[configuration.type]
+    except:
+        raise ValueError(
+            '{} is not a valid generator type.'.format(configuration.type)
         )
 
+    # TODO: Investigate potential side effects of "all records"
+    return generator_class(
+        record_type=RecordType(configuration.type),
+        detector=detector,
+        configuration=configuration
+    )
 
-class GeneratorCollection:
-    def __init__(self) -> None:
-        self.generators = []
 
-    def add(self, generator: AbstractGenerator):
-        self.generators.append(generator)
-
-    def generate(self, **kwargs) -> Collection:
-        events_list: List[Collection] = []
-
-        for generator in self.generators:
-            events_list.append(generator.generate(**kwargs))
-
-        return Collection.concat(events_list)
+def generate(
+        detector: Detector,
+        configuration: GenerationConfiguration
+) -> Collection:
+    generator = get_generator(detector=detector, configuration=configuration.generator)
+    return generator.generate(configuration.number_of_samples)

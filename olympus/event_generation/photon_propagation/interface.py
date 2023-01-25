@@ -1,38 +1,40 @@
 """Module containing the abstract photon propagator interface."""
 from abc import ABC, abstractmethod
+from typing import TypeVar, Generic
 
 import numpy as np
 
 from ananke.models.detector import Detector
 from ananke.models.event import Sources, Hits, Records
-from olympus.constants import defaults
+from olympus.configuration.photon_propagation import PhotonPropagatorConfiguration
 from olympus.event_generation.medium import Medium
 
+_PhotonPropagatorConfiguration = TypeVar(
+    '_PhotonPropagatorConfiguration',
+    bound=PhotonPropagatorConfiguration
+)
 
-class AbstractPhotonPropagator(ABC):
+
+class AbstractPhotonPropagator(ABC, Generic[_PhotonPropagatorConfiguration]):
     """Parent class to ensure common interface for photon propagation."""
 
     def __init__(
             self,
             detector: Detector,
-            medium: Medium,
-            seed: int = defaults['seed'],
-            default_wavelength: float = 450,
-            **kwargs
+            configuration: _PhotonPropagatorConfiguration
     ) -> None:
         """Constructor already saving the detector.
 
         Args:
             detector: Detector to be set
-            medium: Medium for which to propagate
-            seed: Seed of random number Generator
+            configuration: Configuration for photon propagator
         """
-        super().__init__(**kwargs)
+        self.configuration = configuration
         self.detector = detector
-        self.medium = medium
-        self.default_wavelengths = default_wavelength
-        self.seed = seed
-        self.rng = np.random.default_rng(seed)
+        self.medium = Medium(configuration.medium)
+        self.default_wavelengths = configuration.default_wavelength
+        self.seed = configuration.seed
+        self.rng = np.random.default_rng(configuration.seed)
 
     @abstractmethod
     def propagate(

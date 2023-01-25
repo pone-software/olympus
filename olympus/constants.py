@@ -21,6 +21,6 @@ class Constants(object):
 
 
 defaults = {
-    "seed": 1337,
-    "rng": np.random.RandomState(1337)
+    "seed": 32118,
+    "rng": np.random.RandomState(32118)
 }
