@@ -206,8 +206,6 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
 
     def __get_ellipsis_mask(
             self,
-            number_of_modules: int,
-            number_of_sources: int,
             pmt_to_source: jnp.ndarray,
             pmt_to_source_angles: jnp.ndarray,
             pmt_opening_angles_length: int,
@@ -217,8 +215,6 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
         """Calculates the mask of the ellipsis for each pmt and source.
 
         Args:
-            number_of_modules: Number of modules
-            number_of_sources: Number of sources
             pmt_to_source: Vectors from PMTs to Sources
             pmt_to_source_angles: Angles between PMTs and Sources
             pmt_opening_angles_length: Number of indices to account for of PMT
@@ -226,7 +222,7 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
             source_orientations: Vectors representing source orientations
 
         Returns:
-
+            per source mask for the PMTs elliptical field of view
         """
         # calculate rotation of ellipsis
         # first find pmt normal projection on target area
@@ -238,8 +234,9 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
         )
         projected_pmt_normal = jnp.subtract(
             jnp.expand_dims(self.pmt_orientations, axis=1),
-            jnp.multiply(
-                jnp.expand_dims(pmt_normal_to_source_normal_distance, axis=2),
+            jnp.einsum(
+                'ij,ijk->ijk',
+                pmt_normal_to_source_normal_distance,
                 unit_pmt_to_source
             )
         )
@@ -247,7 +244,8 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
         second_target_area_basis = jnp.cross(source_orientations, pmt_to_source)
         # third calculate ellipsis properties
         ellipsis_a_axis = pmt_opening_angles_length / 2
-        ellipsis_b_axis = jnp.multiply(
+        ellipsis_b_axis = jnp.einsum(
+            'ij,ij->ij',
             jnp.cos(pmt_to_source_angles),
             ellipsis_a_axis
         )
@@ -260,53 +258,89 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
         center_index = int(jnp.floor(max_opening_angles_length / 2))
         target_indices = jnp.arange(max_opening_angles_length) \
                              .astype('int16') - center_index
-        target_dimensions = (max_opening_angles_length, max_opening_angles_length)
-        x = jnp.broadcast_to(
-            jnp.square(target_indices),
-            target_dimensions
-        )
-        broadcast_dimensions = (
-                                   number_of_modules, number_of_sources
-                               ) + target_dimensions
         target_full = jnp.einsum('i,j->ij', target_indices, target_indices)
-        broad_x = jnp.broadcast_to(
-            x,
-            broadcast_dimensions
-        )
-        broad_y = jnp.broadcast_to(
-            x.T,
-            broadcast_dimensions
-        )
-        broad_target_full = jnp.broadcast_to(
-            target_full,
-            broadcast_dimensions
+
+        sin_angles = jnp.sin(ellipsis_angles)
+        cos_angles = jnp.cos(ellipsis_angles)
+
+        squared_target = jnp.square(target_indices)
+        first_ellipsis_new = jnp.einsum(
+            'ij,k->ijk',
+            jnp.add(
+                jnp.square(jnp.divide(sin_angles, ellipsis_a_axis)),
+                jnp.square(jnp.divide(cos_angles, ellipsis_b_axis))
+            ),
+            squared_target
         )
 
-        # formula: https://www.maa.org/external_archive/joma/Volume8/Kalman/General.html
-        # TODO: Check Sin Cos of Ellipsis
-        ellipsis_mask = jnp.multiply(
+        last_ellipsis_new = jnp.einsum(
+            'ij,k->ijk',
             jnp.add(
-                jnp.square(jnp.divide(jnp.sin(ellipsis_angles), ellipsis_a_axis)),
-                jnp.square(jnp.divide(jnp.cos(ellipsis_angles), ellipsis_b_axis))
-            )[..., jnp.newaxis, jnp.newaxis],
-            broad_x
-        ) + 2 * jnp.multiply(
-            jnp.multiply(
-                jnp.multiply(jnp.cos(ellipsis_angles), jnp.sin(ellipsis_angles)),
-                jnp.subtract(
-                    jnp.reciprocal(jnp.square(ellipsis_a_axis)),
-                    jnp.reciprocal(jnp.square(ellipsis_b_axis))
-                )
-            )[..., jnp.newaxis, jnp.newaxis],
-            broad_target_full
-        ) + jnp.multiply(
-            jnp.add(
-                jnp.square(jnp.divide(jnp.cos(ellipsis_angles), ellipsis_a_axis)),
-                jnp.square(jnp.divide(jnp.sin(ellipsis_angles), ellipsis_b_axis))
-            )[..., jnp.newaxis, jnp.newaxis],
-            broad_y
+                jnp.square(jnp.divide(cos_angles, ellipsis_a_axis)),
+                jnp.square(jnp.divide(sin_angles, ellipsis_b_axis))
+            ),
+            squared_target
         )
-        return (ellipsis_mask <= 1).astype('int16')
+
+        middle_multiply = jnp.einsum(
+            'ij,ij->ij',
+            jnp.einsum('ij,ij->ij', sin_angles, cos_angles),
+            jnp.subtract(
+                jnp.reciprocal(jnp.square(ellipsis_a_axis)),
+                jnp.reciprocal(jnp.square(ellipsis_b_axis))
+            )
+        )
+
+        # TODO: Check Ellipsis Axis
+        return (
+                       jnp.expand_dims(first_ellipsis_new, axis=2) +
+                       2 * jnp.einsum('ij,kl->ijkl', middle_multiply, target_full) +
+                       jnp.expand_dims(last_ellipsis_new, axis=3)
+               ) <= 1
+
+    def __get_ellipsis_yield(
+            self,
+            source_angle_distribution: jnp.ndarray,
+            number_of_modules: int,
+            angle_indices: jnp.ndarray,
+            pmt_to_source: jnp.ndarray,
+            pmt_to_source_angles: jnp.ndarray,
+            pmt_opening_angles_length: int,
+            max_opening_angles_length: int,
+            source_orientations: jnp.ndarray
+    ) -> jnp.ndarray:
+        """Calculates the mask of the ellipsis for each pmt and source.
+
+        Args:
+            source_angle_distribution: distribution of the angles of the sources
+            number_of_modules: number of PMTs
+            angle_indices: indices of the interesting angles
+            pmt_to_source: Vectors from PMTs to Sources
+            pmt_to_source_angles: Angles between PMTs and Sources
+            pmt_opening_angles_length: Number of indices to account for of PMT
+            max_opening_angles_length: Ceiled number of PMT opening angles
+            source_orientations: Vectors representing source orientations
+
+        Returns:
+            per source and pmt yield in percentage
+        """
+        angular_distribution_per_pmt = jnp.take(
+            jnp.tile(source_angle_distribution, (number_of_modules, 1)),
+            angle_indices
+        )
+        ellipsis_mask = self.__get_ellipsis_mask(
+            source_orientations=source_orientations,
+            pmt_to_source=pmt_to_source,
+            pmt_to_source_angles=pmt_to_source_angles,
+            pmt_opening_angles_length=pmt_opening_angles_length,
+            max_opening_angles_length=max_opening_angles_length
+        )
+
+        return jnp.einsum(
+            '...ij,...i->...',
+            ellipsis_mask,
+            angular_distribution_per_pmt
+        )
 
     def __calculate_angular_yield(
             self,
@@ -341,23 +375,17 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
             jnp.expand_dims(source_orientation_angles_index, axis=2)
         ).astype('int16')
         # Get Angular distribution values for each pmt
-        angular_distribution_per_pmt = jnp.take(
-            jnp.tile(source_angle_distribution, (number_of_modules, 1)),
-            angle_indices
-        )
-        ellipsis_mask = self.__get_ellipsis_mask(
+
+        yield_per_source_and_pmt = self.__get_ellipsis_yield(
+            source_angle_distribution=source_angle_distribution,
             number_of_modules=number_of_modules,
+            angle_indices=angle_indices,
             source_orientations=source_orientations,
             pmt_to_source=pmt_to_source,
-            number_of_sources=number_of_sources,
             pmt_to_source_angles=pmt_to_source_angles,
             pmt_opening_angles_length=pmt_opening_angles_length,
             max_opening_angles_length=max_opening_angle_length
-        )
-        yield_per_source_and_pmt = jnp.einsum(
-            '...ij,...i->...',
-            ellipsis_mask,
-            angular_distribution_per_pmt
+
         )
         # TODO: Check Integral
 
@@ -376,9 +404,13 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
             self,
             pmt_to_source_distances: jnp.ndarray
     ) -> jnp.ndarray:
-        absorption_length = self.medium.get_absolute_length(self.default_wavelengths)
+        absorption_length = self.medium.get_absolute_length(
+            self.default_wavelengths
+        )
 
-        return jnp.exp(-1.0 * jnp.divide(pmt_to_source_distances, absorption_length))
+        return jnp.exp(
+            -1.0 * jnp.divide(pmt_to_source_distances, absorption_length)
+        )
 
     def _get_angle_distribution(
             self, energy: float, particle_id: int
@@ -484,7 +516,9 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
             total_yield = jnp.multiply(angular_yield, distance_yield)
             jnp.einsum('ij,i->ij', total_yield, efficiency_yield)
             photons_per_pmt_per_source = jnp.multiply(total_yield, source_photons.T)
-            photons_per_pmt_per_source = jnp.rint(photons_per_pmt_per_source).astype(
+            photons_per_pmt_per_source = jnp.rint(
+                photons_per_pmt_per_source
+            ).astype(
                 'int16'
             )
 

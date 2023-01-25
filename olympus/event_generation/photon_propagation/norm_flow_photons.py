@@ -763,7 +763,6 @@ class NormalFlowPhotonPropagator(
                 df=sources.df.loc[sources.df.record_id == record.record_id]
             )
             if len(source_records) == 0:
-                hits_list.append(Hits())
                 continue
             hits = self.generate_norm_flow_photons(
                 self.detector.module_locations.to_numpy(dtype=np.float32),

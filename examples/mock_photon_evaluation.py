@@ -4,7 +4,7 @@ import pandas as pd
 import os
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"  # add this
-# os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "\"platform\""
+os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "\"platform\""
 
 import jax
 import jax.numpy as jnp
