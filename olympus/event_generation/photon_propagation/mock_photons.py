@@ -444,7 +444,7 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
             self,
             records: EventRecords,
             sources: Sources,
-            use_multiprocessing: bool = True
+            use_multiprocessing: bool = False
     ) -> Union[Hits, Tuple[Hits, jnp.array]]:
         if len(sources) == 0:
             return Hits()
