@@ -222,15 +222,6 @@ class NoiseGenerator(AbstractGenerator[NoiseGeneratorConfiguration, NoiseType], 
 
 class ElectronicNoiseGenerator(NoiseGenerator):
     """Generates noise according to detector properties."""
-
-    def __init__(
-            self,
-            *args,
-            **kwargs
-    ):
-        """Constructor of the Electronic Noise."""
-        super().__init__(record_type=NoiseType.ELECTRICAL, *args, **kwargs)
-
     def _generate_hits(self, records: NoiseRecords) -> Hits:
         """Generates hits based on noise records.
 
@@ -264,6 +255,7 @@ class ElectronicNoiseGenerator(NoiseGenerator):
                 'record_id': 0,
                 'string_id': 0,
                 'module_id': 0,
+                'type': NoiseType.ELECTRICAL.value
             }
         )
 
@@ -271,6 +263,7 @@ class ElectronicNoiseGenerator(NoiseGenerator):
         string_id_loc = hits_df.columns.get_loc('string_id')
         module_id_loc = hits_df.columns.get_loc('module_id')
         record_id_loc = hits_df.columns.get_loc('record_id')
+        record_type_loc = hits_df.columns.get_loc('type')
 
         iterator = np.nditer(number_of_photons, flags=['f_index'])
 
@@ -284,7 +277,7 @@ class ElectronicNoiseGenerator(NoiseGenerator):
             hits_df.iloc[current_slice, module_id_loc] = current_pmt['module_id']
             hits_df.iloc[current_slice, string_id_loc] = current_pmt['string_id']
             hits_df.iloc[current_slice, record_id_loc] = current_record['record_id']
-            hits_df.iloc[current_slice, record_id_loc] = current_record['type']
+            hits_df.iloc[current_slice, record_type_loc] = current_record['type'].value
             hits_index += nop_per_pmt_and_record
 
         return Hits(df=hits_df)

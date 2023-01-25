@@ -30,9 +30,10 @@ class AbstractGenerator(ABC, Generic[_GeneratorConfiguration, _GeneratorRecordTy
     ):
         """Abstract parent to all detector based generators.
 
-        TODO: Decide whether to include here or in generate method.
+        TODO: Decide whether to include record type here or in generate method.
 
         Args:
+            record_type: Type of the record
             detector: Detector to generate records for.
             configuration: Configuration of the records to generate.
         """
