@@ -1,12 +1,14 @@
 """Modula containing the interface for generators."""
+import os
 import uuid
 from abc import ABC, abstractmethod
-from typing import List, TypeVar, Generic
+from typing import List, TypeVar, Generic, Union
 
 import numpy as np
 
 from ananke.models.detector import Detector
-from ananke.models.event import Collection, Records
+from ananke.models.collection import Collection
+from ananke.models.event import Records
 from ananke.schemas.event import RecordType
 from olympus.configuration.generators import GeneratorConfiguration
 
@@ -47,11 +49,13 @@ class AbstractGenerator(ABC, Generic[_GeneratorConfiguration, _GeneratorRecordTy
     @abstractmethod
     def generate(
             self,
+            collection_path: Union[str, bytes, os.PathLike],
             number_of_samples: int,
     ) -> Collection:
         """Generates a full collection.
 
         Args:
+            collection_path: path to store the collection at
             number_of_samples: Amount of samples to be generated
 
         Returns:
@@ -74,8 +78,7 @@ class AbstractGenerator(ABC, Generic[_GeneratorConfiguration, _GeneratorRecordTy
         """
         pass
 
-    @staticmethod
-    def _get_record_ids(number_of_samples: int) -> List[int]:
+    def _get_record_ids(self, number_of_samples: int) -> List[int]:
         """Generates record uuid1 integer ids for generated objects.
 
         Args:
@@ -84,4 +87,8 @@ class AbstractGenerator(ABC, Generic[_GeneratorConfiguration, _GeneratorRecordTy
         Returns:
             List of integer ids.
         """
-        return [uuid.uuid1().int >> 64 for x in range(number_of_samples)]
+        if self.configuration.fix_uuids:
+            clock = self.configuration.seed
+        else:
+            clock = None
+        return [uuid.uuid1(clock_seq=clock).int >> 64 for x in range(number_of_samples)]

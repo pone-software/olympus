@@ -1,5 +1,6 @@
 """Module containing all the configurations for generating events."""
-from typing import Literal, Union
+from enum import Enum
+from typing import Literal, Union, List, Optional
 
 from pydantic import (
     BaseModel,
@@ -8,6 +9,7 @@ from pydantic import (
     validator, NonNegativeInt,
 )
 
+from ananke.configurations.detector import DetectorConfiguration
 from ananke.schemas.event import EventType, NoiseType
 from .photon_propagation import (
     MockPhotonPropagatorConfiguration,
@@ -24,6 +26,9 @@ class GeneratorConfiguration(BaseModel):
 
     #: type of the configuration
     type: str
+
+    #: For debugging, it might be useful to have similar UUIDs all the time
+    fix_uuids: bool = False
 
 
 class EventPropagatorConfiguration(BaseModel):
@@ -110,9 +115,7 @@ class NoiseGeneratorConfiguration(GeneratorConfiguration):
 
 
 class GenerationConfiguration(BaseModel):
-    """Class to configure how to generate what."""
-
-    #: Generator to generate from
+    """Configuration for a single generation."""
     generator: Union[
         EventGeneratorConfiguration,
         NoiseGeneratorConfiguration,
@@ -120,3 +123,35 @@ class GenerationConfiguration(BaseModel):
 
     #: Number of samples for this Generator
     number_of_samples: NonNegativeInt
+
+
+class DatasetStatus(str, Enum):
+    """Enum containing different collection generation value."""
+    NOT_STARTED = 'not_started'
+    STARTED = 'started'
+    ERROR = 'error'
+    COMPLETE = 'complete'
+
+
+# TODO: Move to generation maybe?
+class DatasetStatusConfiguration(BaseModel):
+    """Configuration for the collection value."""
+    value: DatasetStatus = DatasetStatus.NOT_STARTED
+    error_message: Optional[str] = None
+    current_index: NonNegativeInt = 0
+
+
+class DatasetConfiguration(BaseModel):
+    """Class to configure how to generate what."""
+
+    detector: DetectorConfiguration
+
+    #: Generator to generate from
+    generators: List[GenerationConfiguration]
+
+    #: Path for the generated data to be
+    data_path: str
+
+    status: DatasetStatusConfiguration = Field(
+        default_factory=lambda: DatasetStatusConfiguration()
+    )

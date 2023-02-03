@@ -1,21 +1,24 @@
 """Module containing all event generators."""
 import logging
+import os
+import shutil
 from abc import ABC
-from typing import Type, Dict, Any
+from typing import Type, Dict, Any, Union, Optional
 
 import pandas as pd
 import numpy as np
 
 from ananke.models.detector import Detector
+from ananke.models.collection import Collection
 from ananke.models.event import (
     EventRecords,
     Sources,
-    Collection,
     NoiseRecords,
     Hits,
 )
 from ananke.models.geometry import Vectors3D
 from ananke.schemas.event import EventType, NoiseType, RecordType
+from ananke.services.detector import DetectorBuilderService
 from .detector import sample_direction
 from .injectors import (
     AbstractInjector,
@@ -34,7 +37,7 @@ from ..configuration.generators import (
     EventGeneratorConfiguration,
     NoiseGeneratorConfiguration,
     GeneratorConfiguration,
-    GenerationConfiguration,
+    DatasetConfiguration, DatasetStatus,
 )
 from ..generators import AbstractGenerator
 
@@ -70,9 +73,18 @@ class EventGenerator(AbstractGenerator[EventGeneratorConfiguration, EventType]):
 
     def generate(
             self,
+            collection_path: Union[str, bytes, os.PathLike],
             number_of_samples: int
     ) -> Collection:
-        """Generate realistic muon tracks."""
+        """Generate realistic events
+
+        Args:
+            collection_path: path to store the collection at
+            number_of_samples: to generate
+
+        Returns:
+            Collection containing the events
+        """
 
         logging.info('Starting to generate {} samples'.format(number_of_samples))
         records = self.generate_records(number_of_samples)
@@ -82,11 +94,13 @@ class EventGenerator(AbstractGenerator[EventGeneratorConfiguration, EventType]):
         hits = self.photon_propagator.propagate(records, sources)
 
         collection = Collection(
+            storage_path=collection_path,
             records=records,
             detector=self.propagator.detector,
-            sources=sources,
-            hits=hits
         )
+
+        collection.set_hits(hits=hits, cache=False)
+        collection.set_sources(sources=sources, cache=False)
 
         return collection
 
@@ -213,7 +227,7 @@ class NoiseGenerator(AbstractGenerator[NoiseGeneratorConfiguration, NoiseType], 
 
         noise_records_df['time'] = self.start_time
         noise_records_df['duration'] = self.duration
-        noise_records_df['type'] = self.record_type
+        noise_records_df['type'] = self.record_type.value
 
         noise_records = NoiseRecords(df=noise_records_df)
 
@@ -222,6 +236,7 @@ class NoiseGenerator(AbstractGenerator[NoiseGeneratorConfiguration, NoiseType], 
 
 class ElectronicNoiseGenerator(NoiseGenerator):
     """Generates noise according to detector properties."""
+
     def _generate_hits(self, records: NoiseRecords) -> Hits:
         """Generates hits based on noise records.
 
@@ -277,15 +292,20 @@ class ElectronicNoiseGenerator(NoiseGenerator):
             hits_df.iloc[current_slice, module_id_loc] = current_pmt['module_id']
             hits_df.iloc[current_slice, string_id_loc] = current_pmt['string_id']
             hits_df.iloc[current_slice, record_id_loc] = current_record['record_id']
-            hits_df.iloc[current_slice, record_type_loc] = current_record['type'].value
+            hits_df.iloc[current_slice, record_type_loc] = current_record['type']
             hits_index += nop_per_pmt_and_record
 
         return Hits(df=hits_df)
 
-    def generate(self, number_of_samples: int) -> Collection:
+    def generate(
+            self,
+            collection_path: Union[str, bytes, os.PathLike],
+            number_of_samples: int
+    ) -> Collection:
         """Generate Noise Collection with a given Number of samples.
 
         Args:
+            collection_path: path to store the collection at
             number_of_samples: Amount of Records to be generated
 
         Returns:
@@ -294,10 +314,11 @@ class ElectronicNoiseGenerator(NoiseGenerator):
         records = self.generate_records(number_of_samples)
         hits = self._generate_hits(records)
         collection = Collection(
+            data_path=collection_path,
             detector=self.detector,
-            records=records,
-            hits=hits
+            records=records
         )
+        collection.set_hits(hits=hits, cache=False)
 
         return collection
 
@@ -330,8 +351,74 @@ def get_generator(
 
 
 def generate(
-        detector: Detector,
-        configuration: GenerationConfiguration
+        configuration: Optional[DatasetConfiguration] = None,
+        configuration_path: Optional[Union[str, bytes, os.PathLike]] = None,
+        detector: Optional[Detector] = None,
 ) -> Collection:
-    generator = get_generator(detector=detector, configuration=configuration.generator)
-    return generator.generate(configuration.number_of_samples)
+
+    def save_configuration() -> None:
+        """Saves current configuration."""
+        with open(configuration_path, 'w') as f:
+            f.write(configuration.json(indent=2))
+
+    os.makedirs(configuration.data_path, exist_ok=True)
+
+    if configuration is None:
+        configuration = DatasetConfiguration.parse_file(configuration_path)
+    else:
+        configuration_path = os.path.join(configuration.data_path, 'configuration.json')
+        save_configuration()
+    data_path = os.path.join(configuration.data_path, 'data.h5')
+    tmp_path = os.path.join(configuration.data_path, 'tmp')
+
+    collection = Collection(data_path)
+
+    if detector is None:
+        detector_service = DetectorBuilderService()
+        detector = detector_service.get(configuration=configuration.detector)
+        collection.set_detector(detector)
+    if configuration.status.value == DatasetStatus.NOT_STARTED:
+        configuration.status.value = DatasetStatus.STARTED
+        save_configuration()
+
+    if configuration.status.value == DatasetStatus.COMPLETE:
+        return collection
+
+    try:
+        iterations = range(
+            configuration.status.current_index,
+            len(configuration.generators)
+        )
+        for index in iterations:
+            if index < configuration.status.current_index:
+                continue
+            generator_config = configuration.generators[index]
+            generator = get_generator(
+                detector=detector,
+                configuration=generator_config.generator
+            )
+            generator_collection = generator.generate(
+                collection_path=os.path.join(
+                    tmp_path,
+                    '{index:n}.h5'.format(index=index)
+                ),
+                number_of_samples=generator_config.number_of_samples
+            )
+            collection.append(generator_collection)
+            configuration.status.current_index = index + 1
+            save_configuration()
+
+        shutil.rmtree(tmp_path)
+    except Exception as err:
+        configuration.status.value = DatasetStatus.ERROR
+        configuration.status.error_message = '[{}] {}'.format(
+            type(err).__name__,
+            str(err)
+        )
+        save_configuration()
+        raise err
+
+    configuration.status.value = DatasetStatus.COMPLETE
+    save_configuration()
+
+    return collection

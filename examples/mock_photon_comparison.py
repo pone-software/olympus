@@ -10,7 +10,7 @@ jax.config.update('jax_platform_name', 'cpu')
 
 from ananke.configurations.detector import DetectorConfiguration
 from ananke.services.detector import DetectorBuilderService
-from olympus.configuration.generators import GenerationConfiguration
+from olympus.configuration.generators import DatasetConfiguration
 from olympus.configuration.photon_propagation import (
     MockPhotonPropagatorConfiguration,
     NormalFlowPhotonPropagatorConfiguration,
@@ -52,7 +52,7 @@ detector_configuration = DetectorConfiguration.parse_obj(
 detector_service = DetectorBuilderService()
 det = detector_service.get(configuration=detector_configuration)
 
-configuration = GenerationConfiguration.parse_obj({
+configuration = DatasetConfiguration.parse_obj({
     'generator': {
         'type': 'cascade',
         'spectrum': {
