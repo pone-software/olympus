@@ -8,8 +8,9 @@ import jax.numpy as jnp
 import pandas as pd
 import logging
 
+from ananke.models.collection import Collection
 from ananke.models.detector import Detector
-from ananke.models.event import Sources, Hits, EventRecords
+from ananke.models.event import Hits, EventRecords
 from olympus.configuration.photon_propagation import MockPhotonPropagatorConfiguration
 from olympus.event_generation.lightyield import fennel_angle_distribution_function
 from olympus.event_generation.medium import Medium
@@ -442,20 +443,27 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
 
     def propagate(
             self,
-            records: EventRecords,
-            sources: Sources,
-            use_multiprocessing: bool = False
-    ) -> Union[Hits, Tuple[Hits, jnp.array]]:
-        if len(sources) == 0:
-            return Hits()
-        hits_list = []
+            collection: Collection,
+            use_multiprocessing: bool = False,
+            **kwargs
+    ) -> None:
+        """Propagates a given collection.
+
+        Args:
+            collection: collection to be propagated
+            use_multiprocessing:
+
+        Returns:
+
+        """
+        records = collection.get_records()
         number_of_records = len(records)
         logging.info(
-            'Starting to propagate {} sources from {} records.'.format(
-                len(sources),
+            'Starting to propagate {} records.'.format(
                 number_of_records
             )
         )
+
         for record_index, record in records.df.iterrows():
             logging.info(
                 'Starting with record {} of {} records.'.format(
@@ -463,11 +471,28 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
                     number_of_records
                 )
             )
-            record_sources = sources.get_by_record(record.record_id)
+            record_sources = collection.get_sources(record.record_id)
+            if record_sources is None:
+                logging.info(
+                    'No sources for record {}. Skipping!'.format(
+                        record.record_id
+                    )
+                )
+                continue
+
             number_of_sources = len(record_sources)
             number_of_pmts = len(self.detector)
+            hits_list = []
 
             if number_of_sources == 0:
+                continue
+
+            if collection.get_hits(record.record_id) is not None:
+                logging.warning(
+                    'Record {} has already be propagated. Skipping!'.format(
+                        record.record_id
+                    )
+                )
                 continue
 
             source_locations = record_sources.locations.to_numpy(np.float32)
@@ -556,6 +581,5 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
                         multiprocessing_args
                     )
 
-        all_hits = Hits.concat(hits_list)
-
-        return all_hits
+            record_hits = Hits.concat(hits_list)
+            collection.set_hits(record_hits)

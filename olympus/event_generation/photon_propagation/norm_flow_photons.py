@@ -1,4 +1,5 @@
 """Module containing the normal flow photon propagator."""
+import logging
 import pickle
 from typing import List
 
@@ -8,6 +9,7 @@ import jax.numpy as jnp
 import pandas as pd
 import numpy as np
 
+from ananke.models.collection import Collection
 from ananke.models.event import Sources, Hits, Records
 from hyperion.models.photon_arrival_time_nflow.net import (
     make_counts_net_fn,
@@ -741,28 +743,26 @@ class NormalFlowPhotonPropagator(
 
     def propagate(
             self,
-            records: Records,
-            sources: Sources,
+            collection: Collection,
             **kwargs
-    ) -> Hits:
+    ) -> None:
         """Propagates using the normal flow propagator.
 
         Args:
-            records: Event records to propagate
-            sources: Photon source to propagate
-
-        Returns:
-            List of hits containing propagation result
+            collection to propagate
         """
-        hits_list: List[Hits] = []
         detector_indices = self.detector.indices
         number_pmts = len(detector_indices.index)
         number_pmts_range = range(number_pmts)
+        records = collection.get_records()
         for index, record in records.df.iterrows():
-            source_records = Sources(
-                df=sources.df.loc[sources.df.record_id == record.record_id]
-            )
-            if len(source_records) == 0:
+            source_records = collection.get_sources(record_id=record.record_id)
+            if source_records is None:
+                logging.info(
+                    'No sources for record {}. Skipping!'.format(
+                        record.record_id
+                    )
+                )
                 continue
             hits = self.generate_norm_flow_photons(
                 self.detector.module_locations.to_numpy(dtype=np.float32),
@@ -778,6 +778,7 @@ class NormalFlowPhotonPropagator(
             )
             if len(hits) == 0:
                 continue
+            pmt_hits = []
             for x in number_pmts_range:
                 if len(hits[x]) == 0:
                     continue
@@ -792,7 +793,6 @@ class NormalFlowPhotonPropagator(
                         'type': record.type,
                     }
                 )
-                hits_per_module = Hits(df=hits_df)
-                hits_list.append(hits_per_module)
-
-        return Hits.concat(hits_list)
+                pmt_hits.append(Hits(df=hits_df))
+            record_hits = Hits.concat(pmt_hits)
+            collection.set_hits(record_hits)

@@ -1,5 +1,8 @@
 import os
 
+from ananke.configurations.presets.detector import single_line_configuration
+from ananke.models.collection import Collection
+
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"  # add this
 os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "\"platform\""
 
@@ -8,9 +11,10 @@ import jax
 # Global flag to set a specific platform, must be used at startup.
 jax.config.update('jax_platform_name', 'cpu')
 
-from ananke.configurations.detector import DetectorConfiguration
 from ananke.services.detector import DetectorBuilderService
-from olympus.configuration.generators import DatasetConfiguration
+from olympus.configuration.generators import (
+    GenerationConfiguration,
+)
 from olympus.configuration.photon_propagation import (
     MockPhotonPropagatorConfiguration,
     NormalFlowPhotonPropagatorConfiguration,
@@ -28,31 +32,10 @@ pmt_cath_area_r = 75e-3 / 2  # m
 module_radius = 0.21  # m
 efficiency = 0.42 # Christian S. Number
 
-detector_configuration = DetectorConfiguration.parse_obj(
-    {
-        "string": {
-            "module_number": oms_per_line,
-            "module_distance": dist_z
-        },
-        "pmt": {
-            "efficiency": efficiency,
-            "noise_rate": dark_noise_rate,
-            "area": pmt_cath_area_r
-        },
-        "module": {
-            "radius": module_radius
-        },
-        "geometry": {
-            "type": "single",
-        },
-        "seed": 31338
-    }
-)
-
 detector_service = DetectorBuilderService()
-det = detector_service.get(configuration=detector_configuration)
+det = detector_service.get(configuration=single_line_configuration)
 
-configuration = DatasetConfiguration.parse_obj({
+configuration = GenerationConfiguration.parse_obj({
     'generator': {
         'type': 'cascade',
         'spectrum': {
@@ -72,7 +55,17 @@ records = cascades_generator.generate_records(
     number_of_samples=4
 )
 
+mock_collection = Collection('data/mock_photon_comparison/mock_collection.h5')
+normal_collection = Collection('data/mock_photon_comparison/normal_collection.h5')
+
+mock_collection.set_records(records)
+normal_collection.set_records(records)
+
+# TODO: Check works and remove type hint issue
 sources = cascades_generator.propagate(records)
+
+mock_collection.set_sources(sources)
+normal_collection.set_sources(sources)
 
 mock_photon_propagator_configuration = MockPhotonPropagatorConfiguration(resolution=18000)
 
@@ -91,9 +84,10 @@ normal_photon_propagator = NormalFlowPhotonPropagator(
     configuration=normal_photon_propagator_configuration
 )
 
-mock_hits = mock_photon_propagator.propagate(records, sources)
+mock_photon_propagator.propagate(mock_collection)
 
-mock_hits.df.head()
+normal_photon_propagator.propagate(normal_collection)
 
-normal_hits = normal_photon_propagator.propagate(records, sources)
-normal_hits.df.head()
+hits = mock_collection.get_hits(records.record_ids[3])
+hits2 = normal_collection.get_hits(records.record_ids[3])
+# TODO: Add comparison

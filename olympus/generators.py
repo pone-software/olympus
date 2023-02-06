@@ -49,17 +49,14 @@ class AbstractGenerator(ABC, Generic[_GeneratorConfiguration, _GeneratorRecordTy
     @abstractmethod
     def generate(
             self,
-            collection_path: Union[str, bytes, os.PathLike],
+            collection: Collection,
             number_of_samples: int,
-    ) -> Collection:
+    ) -> None:
         """Generates a full collection.
 
         Args:
-            collection_path: path to store the collection at
+            collection: collection to generate for
             number_of_samples: Amount of samples to be generated
-
-        Returns:
-            Collection containing all generated information.
         """
         pass
 

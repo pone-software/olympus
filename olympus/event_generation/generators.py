@@ -73,36 +73,25 @@ class EventGenerator(AbstractGenerator[EventGeneratorConfiguration, EventType]):
 
     def generate(
             self,
-            collection_path: Union[str, bytes, os.PathLike],
+            collection: Collection,
             number_of_samples: int
-    ) -> Collection:
+    ) -> None:
         """Generate realistic events
 
         Args:
-            collection_path: path to store the collection at
+            collection: collection of the data
             number_of_samples: to generate
-
-        Returns:
-            Collection containing the events
         """
 
         logging.info('Starting to generate {} samples'.format(number_of_samples))
         records = self.generate_records(number_of_samples)
+        collection.set_records(records=records)
+        collection.set_detector(detector=self.propagator.detector)
         sources = self.propagate(records)
         if self.photon_propagator is None:
             raise ValueError('Photon Propagator is not defined')
-        hits = self.photon_propagator.propagate(records, sources)
-
-        collection = Collection(
-            storage_path=collection_path,
-            records=records,
-            detector=self.propagator.detector,
-        )
-
-        collection.set_hits(hits=hits, cache=False)
         collection.set_sources(sources=sources, cache=False)
-
-        return collection
+        self.photon_propagator.propagate(collection=collection)
 
     def generate_records(self, number_of_samples: int) -> EventRecords:
         logging.info('Starting to generate {} records'.format(number_of_samples))
@@ -299,8 +288,8 @@ class ElectronicNoiseGenerator(NoiseGenerator):
 
     def generate(
             self,
-            collection_path: Union[str, bytes, os.PathLike],
-            number_of_samples: int
+            collection: Collection,
+            number_of_samples: int,
     ) -> Collection:
         """Generate Noise Collection with a given Number of samples.
 
@@ -313,11 +302,8 @@ class ElectronicNoiseGenerator(NoiseGenerator):
         """
         records = self.generate_records(number_of_samples)
         hits = self._generate_hits(records)
-        collection = Collection(
-            data_path=collection_path,
-            detector=self.detector,
-            records=records
-        )
+        collection.set_detector(self.detector)
+        collection.set_records(records=records)
         collection.set_hits(hits=hits, cache=False)
 
         return collection
@@ -355,7 +341,6 @@ def generate(
         configuration_path: Optional[Union[str, bytes, os.PathLike]] = None,
         detector: Optional[Detector] = None,
 ) -> Collection:
-
     def save_configuration() -> None:
         """Saves current configuration."""
         with open(configuration_path, 'w') as f:
@@ -397,11 +382,15 @@ def generate(
                 detector=detector,
                 configuration=generator_config.generator
             )
-            generator_collection = generator.generate(
-                collection_path=os.path.join(
+            generator_collection = Collection(
+                data_path=os.path.join(
                     tmp_path,
                     '{index:n}.h5'.format(index=index)
-                ),
+                )
+            )
+
+            generator.generate(
+                generator_collection,
                 number_of_samples=generator_config.number_of_samples
             )
             collection.append(generator_collection)

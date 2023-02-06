@@ -3,36 +3,37 @@ import pandas as pd
 
 import os
 
+from ananke.models.collection import Collection
+from olympus.configuration.photon_propagation import MockPhotonPropagatorConfiguration
+
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"  # add this
 os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "\"platform\""
-
-import jax
-import jax.numpy as jnp
 
 # Global flag to set a specific platform, must be used at startup.
 # jax.config.update('jax_platform_name', 'cpu')
 
-from ananke.configurations.detector import DetectorConfiguration
 from ananke.models.detector import Detector
 from ananke.models.geometry import Vectors3D
 from ananke.models.event import EventRecords, Sources
-from ananke.schemas.detector import DetectorSchema
-from olympus.event_generation.generators import GeneratorCollection, GeneratorFactory
 from olympus.event_generation.medium import MediumEstimationVariant, Medium
-from olympus.event_generation.photon_propagation.mock_photons import MockPhotonPropagator
+from olympus.event_generation.photon_propagation.mock_photons import \
+    MockPhotonPropagator
 
 dark_noise_rate = 16 * 1e-5  # 1/ns
 pmt_cath_area_r = 75e-3 / 2  # m
 module_radius = 0.21  # m
-efficiency = 0.42 # Christian S. Number
+efficiency = 0.42  # Christian S. Number
 
 number_of_steps = 18
 spherical_orientations = np.zeros((number_of_steps, 3))
 
 spherical_orientations[:, 0] = 1
-angle_range = np.linspace(0, -1* np.pi, number_of_steps)
+angle_range = np.linspace(0, -1 * np.pi, number_of_steps)
 spherical_orientations[:, 2] = angle_range
-spherical_orientations_df = pd.DataFrame(spherical_orientations, columns=('norm', 'phi', 'theta'))
+spherical_orientations_df = pd.DataFrame(
+    spherical_orientations,
+    columns=('norm', 'phi', 'theta')
+)
 cartesian_orientations = Vectors3D.from_spherical(spherical_orientations_df)
 
 module_1_df = cartesian_orientations.get_df_with_prefix('pmt_orientation_')
@@ -59,10 +60,13 @@ number_of_steps = 36
 spherical_orientations = np.zeros((number_of_steps, 3))
 
 spherical_orientations[:, 0] = 1
-angle_range = np.linspace(0, 2*np.pi, number_of_steps)
+angle_range = np.linspace(0, 2 * np.pi, number_of_steps)
 spherical_orientations[:, 1] = angle_range
 spherical_orientations[:, 2] = np.pi / 2
-spherical_orientations_df = pd.DataFrame(spherical_orientations, columns=('norm', 'phi', 'theta'))
+spherical_orientations_df = pd.DataFrame(
+    spherical_orientations,
+    columns=('norm', 'phi', 'theta')
+)
 cartesian_orientations = Vectors3D.from_spherical(spherical_orientations_df)
 
 module_2_df = cartesian_orientations.get_df_with_prefix('pmt_orientation_')
@@ -90,10 +94,13 @@ number_of_steps = 36
 spherical_orientations = np.zeros((number_of_steps, 3))
 
 spherical_orientations[:, 0] = 1
-angle_range = np.linspace(0, 2*np.pi, number_of_steps)
+angle_range = np.linspace(0, 2 * np.pi, number_of_steps)
 spherical_orientations[:, 1] = angle_range
 spherical_orientations[:, 2] = np.pi / 4
-spherical_orientations_df = pd.DataFrame(spherical_orientations, columns=('norm', 'phi', 'theta'))
+spherical_orientations_df = pd.DataFrame(
+    spherical_orientations,
+    columns=('norm', 'phi', 'theta')
+)
 cartesian_orientations = Vectors3D.from_spherical(spherical_orientations_df)
 
 module_3_df = cartesian_orientations.get_df_with_prefix('pmt_orientation_')
@@ -145,12 +152,14 @@ module_4_df['string_location_z'] = 0.0
 module_4_detector = Detector(df=module_4_df)
 module_4_detector.df.head()
 
-detector = Detector.concat([
-    module_1_detector,
-    module_2_detector,
-    module_3_detector,
-    module_4_detector,
-])
+detector = Detector.concat(
+    [
+        module_1_detector,
+        module_2_detector,
+        module_3_detector,
+        module_4_detector,
+    ]
+)
 len(detector.df.index)
 
 number_of_steps = 1
@@ -159,7 +168,10 @@ spherical_orientations = np.zeros((number_of_steps, 3))
 spherical_orientations[:, 0] = 1
 angle_range = np.linspace(0, np.pi, number_of_steps)
 spherical_orientations[:, 2] = angle_range
-spherical_orientations_df = pd.DataFrame(spherical_orientations, columns=('norm', 'phi', 'theta'))
+spherical_orientations_df = pd.DataFrame(
+    spherical_orientations,
+    columns=('norm', 'phi', 'theta')
+)
 cartesian_orientations = Vectors3D.from_spherical(spherical_orientations_df)
 
 events_df = cartesian_orientations.get_df_with_prefix('orientation_')
@@ -186,11 +198,23 @@ event_records.df.head()
 
 medium = Medium(MediumEstimationVariant.PONE_OPTIMISTIC)
 
-photon_propagator = MockPhotonPropagator(
-    detector=detector,
-    medium=medium,
-    angle_resolution=18000,
+mock_photon_propagator_configuration = MockPhotonPropagatorConfiguration(
+    resolution=18000
 )
 
-hits = photon_propagator.propagate(event_records, sources)
+photon_propagator = MockPhotonPropagator(
+    detector=detector,
+    configuration=mock_photon_propagator_configuration
+)
+
+collection = Collection(data_path='data/mock_photon_evaluation/data.h5')
+
+collection.set_detector(detector=detector)
+collection.set_records(records=event_records)
+collection.set_sources(sources=sources)
+
+photon_propagator.propagate(collection)
+
+hits = collection.get_hits(event_records.record_ids[0])
+
 hits.df.head()
