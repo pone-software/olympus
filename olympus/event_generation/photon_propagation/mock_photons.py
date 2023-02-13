@@ -1,6 +1,8 @@
 """Module containing code for mock photon source propagation."""
 from multiprocessing import Pool
-from typing import Union, Tuple
+from typing import Union, Tuple, Optional
+
+import math
 
 import numpy as np
 import numpy.typing as npt
@@ -26,7 +28,7 @@ def photons_per_pmt_to_hits(
         angular_yield: jnp.ndarray,
         pmt_indices: Tuple[int, int, int],
         rng: np.random.BitGenerator
-) -> Hits:
+) -> Optional[Hits]:
     """Transforms all the sources of one PMT to hits for that PMT.
 
     Args:
@@ -65,6 +67,9 @@ def photons_per_pmt_to_hits(
             photons
         ) + pmt_times[index]
         hit_times.append(distribution)
+
+    if len(hit_times) == 0:
+        return None
 
     records_hits_df = pd.DataFrame(
         {
@@ -205,17 +210,19 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
 
         return cls.__arccos(dot_products=dot_products)
 
+    @staticmethod
     def __get_ellipsis_mask(
-            self,
+            pmt_orientations: jnp.ndarray,
             pmt_to_source: jnp.ndarray,
             pmt_to_source_angles: jnp.ndarray,
-            pmt_opening_angles_length: int,
+            pmt_opening_angles_length: jnp.ndarray,
             max_opening_angles_length: int,
             source_orientations: jnp.ndarray
     ) -> jnp.ndarray:
         """Calculates the mask of the ellipsis for each pmt and source.
 
         Args:
+            pmt_orientations: Passed due to stepped approach (subset of PMTs)
             pmt_to_source: Vectors from PMTs to Sources
             pmt_to_source_angles: Angles between PMTs and Sources
             pmt_opening_angles_length: Number of indices to account for of PMT
@@ -231,10 +238,10 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
         pmt_normal_to_source_normal_distance = jnp.einsum(
             'ijk,ik->ij',
             unit_pmt_to_source,
-            self.pmt_orientations
+            pmt_orientations
         )
         projected_pmt_normal = jnp.subtract(
-            jnp.expand_dims(self.pmt_orientations, axis=1),
+            jnp.expand_dims(pmt_orientations, axis=1),
             jnp.einsum(
                 'ij,ijk->ijk',
                 pmt_normal_to_source_normal_distance,
@@ -306,7 +313,7 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
             angle_indices: jnp.ndarray,
             pmt_to_source: jnp.ndarray,
             pmt_to_source_angles: jnp.ndarray,
-            pmt_opening_angles_length: int,
+            pmt_opening_angles_length: jnp.ndarray,
             max_opening_angles_length: int,
             source_orientations: jnp.ndarray
     ) -> jnp.ndarray:
@@ -325,23 +332,41 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
         Returns:
             per source and pmt yield in percentage
         """
+        max_memory_usage = self.configuration.max_memory_usage  # 2gb in bytes
+
+        # sources*pmts*angles^2*itemsize
+        necessary_memory = pmt_opening_angles_length.size * \
+                           max_opening_angles_length ** 2 * 4
+
+        steps = math.ceil(necessary_memory / max_memory_usage)
+        step_size = math.floor(number_of_modules / steps)
+
         angular_distribution_per_pmt = jnp.take(
             jnp.tile(source_angle_distribution, (number_of_modules, 1)),
             angle_indices
         )
-        ellipsis_mask = self.__get_ellipsis_mask(
-            source_orientations=source_orientations,
-            pmt_to_source=pmt_to_source,
-            pmt_to_source_angles=pmt_to_source_angles,
-            pmt_opening_angles_length=pmt_opening_angles_length,
-            max_opening_angles_length=max_opening_angles_length
-        )
 
-        return jnp.einsum(
-            '...ij,...i->...',
-            ellipsis_mask,
-            angular_distribution_per_pmt
-        )
+        yield_list = []
+
+        for i in range(steps):
+            start = i * step_size
+            end = start + step_size
+            ellipsis_mask = self.__get_ellipsis_mask(
+                pmt_orientations=self.pmt_orientations[start:end],
+                source_orientations=source_orientations,
+                pmt_to_source=pmt_to_source[start:end],
+                pmt_to_source_angles=pmt_to_source_angles[start:end],
+                pmt_opening_angles_length=pmt_opening_angles_length[start:end],
+                max_opening_angles_length=max_opening_angles_length
+            )
+
+            yield_list.append(jnp.einsum(
+                '...ij,...i->...',
+                ellipsis_mask,
+                angular_distribution_per_pmt[start:end]
+            ))
+
+        return jnp.concatenate(yield_list)
 
     def __calculate_angular_yield(
             self,
@@ -581,5 +606,7 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
                         multiprocessing_args
                     )
 
+            # TODO: Better handling of Empty Hits
             record_hits = Hits.concat(hits_list)
-            collection.set_hits(record_hits)
+            if record_hits is not None:
+                collection.set_hits(record_hits)

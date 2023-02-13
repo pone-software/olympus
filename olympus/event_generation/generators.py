@@ -304,7 +304,7 @@ class ElectronicNoiseGenerator(NoiseGenerator):
         hits = self._generate_hits(records)
         collection.set_detector(self.detector)
         collection.set_records(records=records)
-        collection.set_hits(hits=hits, cache=False)
+        collection.set_hits(hits=hits)
 
         return collection
 

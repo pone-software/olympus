@@ -43,7 +43,11 @@ class MockPhotonPropagatorConfiguration(PhotonPropagatorConfiguration):
         PhotonPropagators.Mock,
     ] = PhotonPropagators.Mock
 
+    #: Amount of steps for 180 degrees
     resolution: NonNegativeInt = 18000
+
+    #: Limits maximal usage per step. Play around if memory errors arise
+    max_memory_usage: NonNegativeInt = 2147483648  # 2gb in bytes
 
 
 class NormalFlowPhotonPropagatorConfiguration(PhotonPropagatorConfiguration):

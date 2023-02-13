@@ -19,12 +19,10 @@ dataset_configuration = DatasetConfiguration(
     generators=[
         GenerationConfiguration(
             generator=noise_generator_config,
-            number_of_samples=1000
+            number_of_samples=100000
         ),
     ],
-    data_path='data/noise_generation/electrical_noise_1000'
+    data_path='data/noise_generation/electrical_noise_100000'
 )
 
 mock_collection = generate(dataset_configuration)
-
-records = mock_collection.get_records()
