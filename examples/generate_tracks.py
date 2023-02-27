@@ -20,6 +20,10 @@ from olympus.configuration.generators import DatasetConfiguration
 from ananke.configurations.presets.detector import single_line_configuration
 from olympus.event_generation.generators import generate
 
+import logging
+
+logging.getLogger().setLevel(logging.INFO)
+
 photon_propagator_configuration = MockPhotonPropagatorConfiguration(
     resolution=18000,
     medium=MediumEstimationVariant.PONE_OPTIMISTIC,
@@ -31,17 +35,17 @@ configuration = DatasetConfiguration(
     generators=[
         GenerationConfiguration(
             generator=EventGeneratorConfiguration(
-                type=EventType.CASCADE,
+                type=EventType.STARTING_TRACK,
                 spectrum=UniformSpectrumConfiguration(
                     log_minimal_energy=2.0,
                     log_maximal_energy=5.5
                 ),
                 source_propagator=photon_propagator_configuration
             ),
-            number_of_samples=20
+            number_of_samples=10
         )
     ],
-    data_path="data/cascades/cascades_202"
+    data_path="../../data/starting_track_10"
 )
 
 collection = generate(configuration)

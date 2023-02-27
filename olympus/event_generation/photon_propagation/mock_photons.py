@@ -528,6 +528,7 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
                                 record_id
                             )
                         )
+                        pbar.update()
                         continue
 
                     number_of_sources = len(record_sources)
