@@ -18,6 +18,7 @@ from .lightyield import (
 from .utils import proposal_setup
 from ..configuration.generators import EventPropagatorConfiguration
 
+
 # TODO: Configuration only needed for One Propagator
 class AbstractPropagator(ABC):
     def __init__(
@@ -84,7 +85,6 @@ class AbstractPropagator(ABC):
     def propagate(self, records: EventRecords) -> Sources:
         key, k1, k2 = random.split(random.PRNGKey(self.seed), 3)
 
-
         logging.info('Starting to propagate {} records'.format(len(records)))
         sources = self._records_to_sources(records=records, k1=k1)
         logging.info('Finished propagating {} records'.format(len(records)))
@@ -104,23 +104,25 @@ class TrackPropagator(AbstractPropagator):
 
     def _records_to_sources(self, records: EventRecords, k1: str) -> Sources:
         source_records: List[Sources] = []
-        for index, event_record in records.df.iterrows():
+        number_of_records = len(records)
+        for index, event_record in enumerate(records.df.itertuples()):
             sources = generate_muon_energy_losses(
                 self.proposal_propagator,
-                event_record['energy'],
-                event_record['length'],
-                np.array(event_record['location']),
-                np.array(event_record['orientation']),
-                event_record['time'],
+                getattr(event_record, 'energy'),
+                getattr(event_record, 'length'),
+                np.array(getattr(event_record, 'location')),
+                np.array(getattr(event_record, 'orientation')),
+                getattr(event_record, 'time'),
                 k1
             )
 
             event_source_records = self._convert_to_sources(
-                event_record['record_id'],
+                getattr(event_record, 'record_id'),
                 sources[:-1]
             )
             records.df.loc[index, 'length'] = sources[-1]
             source_records.append(event_source_records)
+            logging.info('Propagated record {} of {}.'.format(index, number_of_records))
 
         return Sources.concat(source_records)
 
@@ -137,33 +139,33 @@ class CascadePropagator(AbstractPropagator):
 
     def _records_to_sources(self, records: EventRecords, k1: str) -> Sources:
         source_records: List[Sources] = []
-        for index, event_record in records.df.iterrows():
+        for event_record in records.df.itertuples():
             location = np.array(
                 [
-                    event_record.get('location_x'),
-                    event_record.get('location_y'),
-                    event_record.get('location_z'),
+                    getattr(event_record, 'location_x'),
+                    getattr(event_record, 'location_y'),
+                    getattr(event_record, 'location_z'),
                 ]
             )
             orientation = np.array(
                 [
-                    event_record.get('orientation_x'),
-                    event_record.get('orientation_y'),
-                    event_record.get('orientation_z'),
+                    getattr(event_record, 'orientation_x'),
+                    getattr(event_record, 'orientation_y'),
+                    getattr(event_record, 'orientation_z'),
                 ]
             )
             sources = make_realistic_cascade_source(
                 location,
-                event_record.time,
+                getattr(event_record, 'time'),
                 orientation,
-                event_record.energy,
-                event_record.particle_id,
+                getattr(event_record, 'energy'),
+                getattr(event_record, 'particle_id'),
                 key=k1,
                 moliere_rand=True,
                 resolution=self.resolution
             )
             event_source_records = self._convert_to_sources(
-                event_record['record_id'],
+                getattr(event_record, 'record_id'),
                 sources
             )
             source_records.append(event_source_records)
@@ -189,6 +191,8 @@ class StartingTrackPropagator(TrackPropagator, CascadePropagator):
         cascade_event_records.df.assign(energy=lambda x: (1 - inelas) * x.energy)
 
         track_sources = super(TrackPropagator, self).propagate(track_event_records)
-        cascade_sources = super(CascadePropagator, self).propagate(cascade_event_records)
+        cascade_sources = super(CascadePropagator, self).propagate(
+            cascade_event_records
+        )
 
         return Sources.concat([track_sources, cascade_sources])

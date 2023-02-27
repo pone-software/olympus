@@ -1,7 +1,7 @@
 """Module containing the normal flow photon propagator."""
 import logging
 import pickle
-from typing import List
+from typing import List, Optional, Union
 
 import awkward as ak
 import jax
@@ -11,6 +11,7 @@ import numpy as np
 
 from ananke.models.collection import Collection
 from ananke.models.event import Sources, Hits, Records
+from ananke.schemas.event import EventTypes
 from hyperion.models.photon_arrival_time_nflow.net import (
     make_counts_net_fn,
     make_shape_conditioner_fn,
@@ -741,27 +742,39 @@ class NormalFlowPhotonPropagator(
             self.configuration.padding_base
         )
 
+    # TODO: Migrate common behaviour to Parent Class
     def propagate(
             self,
             collection: Collection,
+            record_type: Optional[
+                Union[
+                    List[EventTypes],
+                    EventTypes
+                ]
+            ] = None,
             **kwargs
     ) -> None:
         """Propagates using the normal flow propagator.
 
         Args:
-            collection to propagate
+            collection: collection to propagate
+            record_type: record type to propagate
         """
         detector_indices = self.detector.indices
         number_pmts = len(detector_indices.index)
         number_pmts_range = range(number_pmts)
-        records = collection.get_records()
-        for index, record in records.df.iterrows():
-            source_records = collection.get_sources(record_id=record.record_id)
+        records = collection.get_records_with_hits(record_type=record_type, invert=True)
+        if records is None:
+            raise ValueError('No records to propagate')
+
+        for record in records.df.itertuples():
+            record_id = getattr(record, 'record_id')
+            hits_records = collection.get_hits(record_id=record_id)
+
+            source_records = collection.get_sources(record_id=record_id)
             if source_records is None:
                 logging.info(
-                    'No sources for record {}. Skipping!'.format(
-                        record.record_id
-                    )
+                    'No sources for record {}. Skipping!'.format(record_id)
                 )
                 continue
             hits = self.generate_norm_flow_photons(
@@ -789,8 +802,8 @@ class NormalFlowPhotonPropagator(
                         'string_id': current_indices.string_id,
                         'module_id': current_indices.module_id,
                         'pmt_id': current_indices.pmt_id,
-                        'record_id': record.record_id,
-                        'type': record.type,
+                        'record_id': record_id,
+                        'type': getattr(record, 'type'),
                     }
                 )
                 pmt_hits.append(Hits(df=hits_df))

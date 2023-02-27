@@ -1,6 +1,6 @@
 """Module containing code for mock photon source propagation."""
 from multiprocessing import Pool
-from typing import Union, Tuple, Optional
+from typing import Union, Tuple, Optional, List
 
 import math
 
@@ -10,9 +10,12 @@ import jax.numpy as jnp
 import pandas as pd
 import logging
 
+from tqdm import tqdm
+
 from ananke.models.collection import Collection
 from ananke.models.detector import Detector
 from ananke.models.event import Hits, EventRecords
+from ananke.schemas.event import EventTypes
 from olympus.configuration.photon_propagation import MockPhotonPropagatorConfiguration
 from olympus.event_generation.lightyield import fennel_angle_distribution_function
 from olympus.event_generation.medium import Medium
@@ -23,9 +26,9 @@ from olympus.event_generation.photon_propagation.interface import \
 def photons_per_pmt_to_hits(
         record_id: int,
         record_type: str,
-        pmt_photons: jnp.ndarray,
-        pmt_times: jnp.ndarray,
-        angular_yield: jnp.ndarray,
+        pmt_photons: np.ndarray,
+        pmt_times: np.ndarray,
+        angular_yield: np.ndarray,
         pmt_indices: Tuple[int, int, int],
         rng: np.random.BitGenerator
 ) -> Optional[Hits]:
@@ -45,14 +48,17 @@ def photons_per_pmt_to_hits(
     """
     logging.log(
         logging.INFO,
-        "Processed PMT {} for Record {}".format(
-            pmt_indices, record_id
+        "Processed PMT (S: {}, M: {}, P: {}) for Record {}".format(
+            getattr(pmt_indices, 'string_id'),
+            getattr(pmt_indices, 'module_id'),
+            getattr(pmt_indices, 'pmt_id'),
+            record_id
         )
     )
 
     # TODO: Verify the distributions look nice
     scaled_angular = angular_yield * 1E4
-    gamma = 2 * jnp.exp(-0.5 * scaled_angular)
+    gamma = 2 * np.exp(-0.5 * scaled_angular)
 
     hit_times = []
 
@@ -73,7 +79,7 @@ def photons_per_pmt_to_hits(
 
     records_hits_df = pd.DataFrame(
         {
-            'time': jnp.concatenate(hit_times),
+            'time': np.concatenate(hit_times),
             'string_id': pmt_indices[0],
             'module_id': pmt_indices[1],
             'pmt_id': pmt_indices[2],
@@ -309,7 +315,7 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
     def __get_ellipsis_yield(
             self,
             source_angle_distribution: jnp.ndarray,
-            number_of_modules: int,
+            number_of_pmts: int,
             angle_indices: jnp.ndarray,
             pmt_to_source: jnp.ndarray,
             pmt_to_source_angles: jnp.ndarray,
@@ -321,7 +327,7 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
 
         Args:
             source_angle_distribution: distribution of the angles of the sources
-            number_of_modules: number of PMTs
+            number_of_pmts: number of PMTs
             angle_indices: indices of the interesting angles
             pmt_to_source: Vectors from PMTs to Sources
             pmt_to_source_angles: Angles between PMTs and Sources
@@ -339,10 +345,10 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
                            max_opening_angles_length ** 2 * 4
 
         steps = math.ceil(necessary_memory / max_memory_usage)
-        step_size = math.floor(number_of_modules / steps)
+        step_size = math.ceil(number_of_pmts / steps)
 
         angular_distribution_per_pmt = jnp.take(
-            jnp.tile(source_angle_distribution, (number_of_modules, 1)),
+            jnp.tile(source_angle_distribution, (number_of_pmts, 1)),
             angle_indices
         )
 
@@ -360,17 +366,19 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
                 max_opening_angles_length=max_opening_angles_length
             )
 
-            yield_list.append(jnp.einsum(
-                '...ij,...i->...',
-                ellipsis_mask,
-                angular_distribution_per_pmt[start:end]
-            ))
+            yield_list.append(
+                jnp.einsum(
+                    '...ij,...i->...',
+                    ellipsis_mask,
+                    angular_distribution_per_pmt[start:end]
+                )
+            )
 
         return jnp.concatenate(yield_list)
 
     def __calculate_angular_yield(
             self,
-            number_of_modules: int,
+            number_of_pmts: int,
             number_of_sources: int,
             source_orientations: jnp.ndarray,
             source_angle_distribution: jnp.ndarray,
@@ -397,14 +405,14 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
         angle_indices = jnp.indices((max_opening_angle_length,)) - \
                         jnp.rint(max_opening_angle_length / 2)
         angle_indices = jnp.add(
-            jnp.tile(angle_indices, (number_of_modules, number_of_sources, 1)),
+            jnp.tile(angle_indices, (number_of_pmts, number_of_sources, 1)),
             jnp.expand_dims(source_orientation_angles_index, axis=2)
         ).astype('int16')
         # Get Angular distribution values for each pmt
 
         yield_per_source_and_pmt = self.__get_ellipsis_yield(
             source_angle_distribution=source_angle_distribution,
-            number_of_modules=number_of_modules,
+            number_of_pmts=number_of_pmts,
             angle_indices=angle_indices,
             source_orientations=source_orientations,
             pmt_to_source=pmt_to_source,
@@ -469,6 +477,12 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
     def propagate(
             self,
             collection: Collection,
+            record_type: Optional[
+                Union[
+                    List[EventTypes],
+                    EventTypes
+                ]
+            ] = None,
             use_multiprocessing: bool = False,
             **kwargs
     ) -> None:
@@ -476,12 +490,15 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
 
         Args:
             collection: collection to be propagated
+            record_type: type of records to propagate
             use_multiprocessing:
 
         Returns:
 
         """
-        records = collection.get_records()
+        records = collection.get_records_with_hits(record_type=record_type, invert=True)
+        if records is None:
+            raise ValueError('No records to propagate')
         number_of_records = len(records)
         logging.info(
             'Starting to propagate {} records.'.format(
@@ -489,124 +506,123 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
             )
         )
 
-        for record_index, record in records.df.iterrows():
-            logging.info(
-                'Starting with record {} of {} records.'.format(
-                    record_index + 1,
-                    number_of_records
-                )
-            )
-            record_sources = collection.get_sources(record.record_id)
-            if record_sources is None:
-                logging.info(
-                    'No sources for record {}. Skipping!'.format(
-                        record.record_id
-                    )
-                )
-                continue
+        number_of_pmts = self.detector.number_of_pmts
 
-            number_of_sources = len(record_sources)
-            number_of_pmts = len(self.detector)
-            hits_list = []
-
-            if number_of_sources == 0:
-                continue
-
-            if collection.get_hits(record.record_id) is not None:
-                logging.warning(
-                    'Record {} has already be propagated. Skipping!'.format(
-                        record.record_id
-                    )
-                )
-                continue
-
-            source_locations = record_sources.locations.to_numpy(np.float32)
-            source_locations = jnp.array(source_locations)
-
-            source_orientations = record_sources.orientations.to_numpy(np.float32)
-            source_orientations = jnp.array(source_orientations)
-
-            source_photons = record_sources.number_of_photons.to_numpy(np.float32)
-            source_photons = jnp.array(source_photons)
-
-            source_times = record_sources.times.to_numpy(np.float32)
-            source_times = jnp.array(source_times)
-
-            # 1. Calculate angle between PMT and Source direction
-            expanded_pmt_positions = jnp.tile(
-                jnp.expand_dims(self.pmt_positions, axis=1),
-                (1, number_of_sources, 1)
-            )
-            pmt_to_source = source_locations - expanded_pmt_positions
-            pmt_to_source_distances = jnp.linalg.norm(pmt_to_source, axis=2)
-
-            source_angle_distribution = self._get_angle_distribution(
-                energy=record.energy,
-                particle_id=record.particle_id
-            )
-
-            # 2. Mask sources in direction of PMT (180°)
-            angular_yield = self.__calculate_angular_yield(
-                number_of_modules=number_of_pmts,
-                number_of_sources=number_of_sources,
-                source_orientations=source_orientations,
-                pmt_to_source=pmt_to_source,
-                source_angle_distribution=source_angle_distribution,
-                pmt_to_source_distances=pmt_to_source_distances
-            )
-            # 3. Calculate Yield based on distance
-            distance_yield = self.__calculate_distance_yield(
-                pmt_to_source_distances=pmt_to_source_distances
-            )
-
-            # 4. Calculate Yield based on PMT Efficiency
-            efficiency_yield = self.pmt_efficiencies
-
-            # 4. Calculate Number of Photons
-            total_yield = jnp.multiply(angular_yield, distance_yield)
-            jnp.einsum('ij,i->ij', total_yield, efficiency_yield)
-            photons_per_pmt_per_source = jnp.multiply(total_yield, source_photons.T)
-            photons_per_pmt_per_source = jnp.rint(
-                photons_per_pmt_per_source
-            ).astype(
-                'int16'
-            )
-
-            # 5. Calculate Arrival Time
-            travel_time = pmt_to_source_distances / self.medium.get_c_medium_photons(
-                self.default_wavelengths
-            )
-            times_per_pmt_per_source = jnp.add(travel_time, source_times.T)
-
-            # 5. Distribute Yield using Gamma distribution
-
-            multiprocessing_args = []
-
-            for pmt_index, pmt_photons in enumerate(photons_per_pmt_per_source):
-                if jnp.max(pmt_photons) > 0:
-                    multiprocessing_args.append(
-                        (
-                            record.record_id,
-                            record.type,
-                            pmt_photons,
-                            times_per_pmt_per_source[pmt_index],
-                            angular_yield[pmt_index],
-                            self.pmt_indices.iloc[pmt_index],
-                            self.rng
+        with tqdm(total=number_of_records) as pbar:
+            for record_index, record in enumerate(records.df.itertuples()):
+                try:
+                    logging.info(
+                        'Starting with record {} of {} records.'.format(
+                            record_index + 1,
+                            number_of_records
                         )
                     )
+                    record_id = getattr(record, 'record_id')
+                    record_type = getattr(record, 'type')
+                    record_energy = getattr(record, 'energy')
+                    record_particle_id = getattr(record, 'particle_id')
+                    record_sources = collection.get_sources(record_id)
+                    if record_sources is None:
+                        logging.info(
+                            'No sources for record {}. Skipping!'.format(
+                                record_id
+                            )
+                        )
+                        continue
 
-            if not use_multiprocessing:
-                for args in multiprocessing_args:
-                    hits_list.append(photons_per_pmt_to_hits(*args))
-            else:
-                with Pool() as pool:
-                    hits_list += pool.starmap(
-                        photons_per_pmt_to_hits,
-                        multiprocessing_args
+                    number_of_sources = len(record_sources)
+                    hits_list = []
+
+                    source_locations = record_sources.locations.to_numpy(np.float32)
+                    source_locations = jnp.array(source_locations)
+
+                    source_orientations = record_sources.orientations.to_numpy(np.float32)
+                    source_orientations = jnp.array(source_orientations)
+
+                    source_photons = record_sources.number_of_photons.to_numpy(np.float32)
+                    source_photons = jnp.array(source_photons)
+
+                    source_times = record_sources.times.to_numpy(np.float32)
+                    source_times = jnp.array(source_times)
+
+                    # 1. Calculate angle between PMT and Source direction
+                    expanded_pmt_positions = jnp.tile(
+                        jnp.expand_dims(self.pmt_positions, axis=1),
+                        (1, number_of_sources, 1)
+                    )
+                    pmt_to_source = source_locations - expanded_pmt_positions
+                    pmt_to_source_distances = jnp.linalg.norm(pmt_to_source, axis=2)
+
+                    source_angle_distribution = self._get_angle_distribution(
+                        energy=record_energy,
+                        particle_id=record_particle_id
                     )
 
-            # TODO: Better handling of Empty Hits
-            record_hits = Hits.concat(hits_list)
-            if record_hits is not None:
-                collection.set_hits(record_hits)
+                    # 2. Mask sources in direction of PMT (180°)
+                    angular_yield = self.__calculate_angular_yield(
+                        number_of_pmts=number_of_pmts,
+                        number_of_sources=number_of_sources,
+                        source_orientations=source_orientations,
+                        pmt_to_source=pmt_to_source,
+                        source_angle_distribution=source_angle_distribution,
+                        pmt_to_source_distances=pmt_to_source_distances
+                    )
+                    # 3. Calculate Yield based on distance
+                    distance_yield = self.__calculate_distance_yield(
+                        pmt_to_source_distances=pmt_to_source_distances
+                    )
+
+                    # 4. Calculate Yield based on PMT Efficiency
+                    efficiency_yield = self.pmt_efficiencies
+
+                    # 4. Calculate Number of Photons
+                    total_yield = jnp.multiply(angular_yield, distance_yield)
+                    jnp.einsum('ij,i->ij', total_yield, efficiency_yield)
+                    photons_per_pmt_per_source = jnp.multiply(total_yield, source_photons.T)
+                    photons_per_pmt_per_source = jnp.rint(
+                        photons_per_pmt_per_source
+                    ).astype(
+                        'int16'
+                    )
+
+                    # 5. Calculate Arrival Time
+                    travel_time = pmt_to_source_distances / self.medium.get_c_medium_photons(
+                        self.default_wavelengths
+                    )
+                    times_per_pmt_per_source = jnp.add(travel_time, source_times.T)
+
+                    # 5. Distribute Yield using Gamma distribution
+
+                    multiprocessing_args = []
+
+                    for pmt_index, pmt_photons in enumerate(photons_per_pmt_per_source):
+                        if jnp.max(pmt_photons) > 0:
+                            multiprocessing_args.append(
+                                (
+                                    record_id,
+                                    record_type,
+                                    np.array(pmt_photons),
+                                    np.array(times_per_pmt_per_source[pmt_index]),
+                                    np.array(angular_yield[pmt_index]),
+                                    self.pmt_indices.iloc[pmt_index],
+                                    self.rng
+                                )
+                            )
+
+                    # if not use_multiprocessing:
+                    #     for args in multiprocessing_args:
+                    #         hits_list.append(photons_per_pmt_to_hits(*args))
+                    # else:
+                    with Pool() as pool:
+                        hits_list += pool.starmap(
+                            photons_per_pmt_to_hits,
+                            multiprocessing_args
+                        )
+
+                    # TODO: Better handling of Empty Hits
+                    record_hits = Hits.concat(hits_list)
+                    if record_hits is not None:
+                        collection.set_hits(record_hits)
+                except RuntimeError:
+                    logging.warning('Tried to allocate to much GPU memory.')
+                pbar.update()

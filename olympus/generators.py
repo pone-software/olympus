@@ -1,15 +1,16 @@
 """Modula containing the interface for generators."""
+import logging
 import os
 import uuid
 from abc import ABC, abstractmethod
-from typing import List, TypeVar, Generic, Union
+from typing import List, TypeVar, Generic
 
 import numpy as np
 
 from ananke.models.detector import Detector
 from ananke.models.collection import Collection
-from ananke.models.event import Records
 from ananke.schemas.event import RecordType
+from ananke.utils import get_64_bit_signed_uuid_int
 from olympus.configuration.generators import GeneratorConfiguration
 
 _GeneratorConfiguration = TypeVar(
@@ -46,13 +47,112 @@ class AbstractGenerator(ABC, Generic[_GeneratorConfiguration, _GeneratorRecordTy
         self.detector = detector
         self.rng = np.random.default_rng(configuration.seed)
 
-    @abstractmethod
     def generate(
             self,
             collection: Collection,
             number_of_samples: int,
+            drop_empty_records: bool = True,
+            recompress: bool = True,
+            append: bool = False
+    ):
+        """Generates a full collection.
+
+        Args:
+            collection: collection to generate for
+            number_of_samples: Amount of samples to be generated
+            drop_empty_records: Ensure only records with hits count
+            recompress: Recompress collection after complete creation.
+            append: generate full number of samples anyway
+        """
+        self._generate(
+            collection=collection,
+            number_of_samples=number_of_samples,
+            drop_empty_records=drop_empty_records,
+            recursion_depth=0,
+            append=append
+        )
+        if recompress:
+            collection.recompress()
+
+    def _generate(
+            self,
+            collection: Collection,
+            number_of_samples: int,
+            drop_empty_records: bool,
+            recursion_depth: int,
+            append: bool = False
     ) -> None:
         """Generates a full collection.
+
+        Args:
+            collection: collection to generate for
+            number_of_samples: Amount of samples to be generated
+            drop_empty_records: Ensure only records with hits count
+            recursion_depth: Recursive stopping mechanism
+            append: generate full number of samples anyway
+        """
+        # get valid number of current samples
+        if drop_empty_records:
+            collection.drop_no_hit_records()
+        current_records = collection.get_records()
+        if current_records is None:
+            current_samples = 0
+        else:
+            current_samples = len(collection.get_records())
+        del current_records
+
+        # get number of samples to add depending on first call
+        if recursion_depth == 0:
+            if append:
+                number_of_samples = number_of_samples + current_samples
+            else:
+                number_of_samples = number_of_samples
+        samples_to_generate = number_of_samples - current_samples
+
+        # No more samples to add, return
+        if samples_to_generate <= 0:
+            logging.info(
+                'Finished to generate {} {}'.format(
+                    samples_to_generate,
+                    self.record_type
+                )
+            )
+            return
+
+        # Now lets get started
+        logging.info(
+            'Starting to generate {} {}'.format(samples_to_generate, self.record_type)
+        )
+        self.generate_records(
+            collection=collection,
+            number_of_samples=samples_to_generate
+        )
+        self.generate_sources(collection=collection)
+        self.generate_hits(collection=collection)
+
+        if recursion_depth == 500:
+            raise RecursionError(
+                'Record Generation not deterministic for {} levels'.format(
+                    recursion_depth
+                )
+            )
+
+        # let's do it all again (will stop if enough records)
+        self._generate(
+            collection=collection,
+            number_of_samples=number_of_samples,
+            drop_empty_records=drop_empty_records,
+            recursion_depth=recursion_depth + 1,
+            append=append
+        )
+
+    @abstractmethod
+    def generate_records(
+            self,
+            collection: Collection,
+            number_of_samples: int,
+    ) -> None:
+        """Generates and sets the records to further evaluate.
 
         Args:
             collection: collection to generate for
@@ -60,18 +160,26 @@ class AbstractGenerator(ABC, Generic[_GeneratorConfiguration, _GeneratorRecordTy
         """
         pass
 
-    @abstractmethod
-    def generate_records(
+    def generate_sources(
             self,
-            number_of_samples: int,
-    ) -> Records:
-        """Generates the raw records to further evaluate.
+            collection: Collection,
+    ) -> None:
+        """Generates and sets the sources to further evaluate.
 
         Args:
-            number_of_samples: Amount of records to be generated.
+            collection: collection to generate for
+        """
+        pass
 
-        Returns:
-            Records to be processed.
+    @abstractmethod
+    def generate_hits(
+            self,
+            collection: Collection,
+    ) -> None:
+        """Generates and sets the hits to further evaluate.
+
+        Args:
+            collection: collection to generate for
         """
         pass
 
@@ -88,4 +196,7 @@ class AbstractGenerator(ABC, Generic[_GeneratorConfiguration, _GeneratorRecordTy
             clock = self.configuration.seed
         else:
             clock = None
-        return [uuid.uuid1(clock_seq=clock).int >> 64 for x in range(number_of_samples)]
+        return [
+            get_64_bit_signed_uuid_int(clock=clock)
+            for x in range(number_of_samples)
+        ]

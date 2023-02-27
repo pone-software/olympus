@@ -1,11 +1,13 @@
 """Module containing the abstract photon propagator interface."""
 from abc import ABC, abstractmethod
-from typing import TypeVar, Generic
+from typing import TypeVar, Generic, List, Optional, Union
 
 import numpy as np
 
+from ananke.models.collection import Collection
 from ananke.models.detector import Detector
 from ananke.models.event import Sources, Hits, Records
+from ananke.schemas.event import EventTypes
 from olympus.configuration.photon_propagation import PhotonPropagatorConfiguration
 from olympus.event_generation.medium import Medium
 
@@ -39,15 +41,20 @@ class AbstractPhotonPropagator(ABC, Generic[_PhotonPropagatorConfiguration]):
     @abstractmethod
     def propagate(
             self,
-            records: Records,
-            sources: Sources,
+            collection: Collection,
+            record_type: Optional[
+                Union[
+                    List[EventTypes],
+                    EventTypes
+                ]
+            ] = None,
             **kwargs
     ) -> Hits:
         """Propagates photon source towards the detector.
 
         Args:
-            records: events of sources to propagate
-            sources: photon source to propagate
+            collection: Collection of Records and Sources to Propagate
+            record_type: Record type to propagate
 
         Returns:
             List of the detector hits based on photon source

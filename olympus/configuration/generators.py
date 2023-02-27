@@ -114,15 +114,40 @@ class NoiseGeneratorConfiguration(GeneratorConfiguration):
     duration: NonNegativeFloat
 
 
+class BioluminescenceGeneratorConfiguration(NoiseGeneratorConfiguration):
+    """Class for noise generators"""
+
+    #: type of noise generator
+    type: Literal[
+        NoiseType.BIOLUMINESCENCE,
+    ]
+
+    #: Time when the noise should start
+    julia_data_path: str
+
+    #: Duration of the noise interval
+    number_of_sources: Optional[int] = None
+
+    #: Size of Multiprocessing Batches
+    batch_size: int = 100
+
+
 class GenerationConfiguration(BaseModel):
     """Configuration for a single generation."""
     generator: Union[
         EventGeneratorConfiguration,
         NoiseGeneratorConfiguration,
+        BioluminescenceGeneratorConfiguration
     ] = Field(..., discriminator='type')
 
     #: Number of samples for this Generator
     number_of_samples: NonNegativeInt
+
+    #: Make sure we get n samples with hits
+    drop_empty_records: bool = True
+
+    #: Whether always to add according samples or work with existing ones
+    append: bool = False
 
 
 class DatasetStatus(str, Enum):
