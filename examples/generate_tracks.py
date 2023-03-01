@@ -35,17 +35,17 @@ configuration = DatasetConfiguration(
     generators=[
         GenerationConfiguration(
             generator=EventGeneratorConfiguration(
-                type=EventType.STARTING_TRACK,
+                type=EventType.REALISTIC_TRACK,
                 spectrum=UniformSpectrumConfiguration(
                     log_minimal_energy=2.0,
                     log_maximal_energy=5.5
                 ),
                 source_propagator=photon_propagator_configuration
             ),
-            number_of_samples=10
+            number_of_samples=10000
         )
     ],
-    data_path="../../data/starting_track_10"
+    data_path="../../data/realistic_track_10000"
 )
 
 collection = generate(configuration)

@@ -25,10 +25,10 @@ configuration = DatasetConfiguration(
                 julia_data_path='../../data/biolumi_sims',
                 batch_size= 48
             ),
-            number_of_samples=30000
+            number_of_samples=100000
         )
     ],
-    data_path="data/bioluminescence_30000"
+    data_path="data/bioluminescence_100000"
 )
 
 collection = generate(configuration)
