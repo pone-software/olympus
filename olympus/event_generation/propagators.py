@@ -79,7 +79,7 @@ class AbstractPropagator(ABC):
         source_record_df['record_id'] = record_id
         source_record_df['time'] = source_times
         source_record_df['number_of_photons'] = source_number_of_photons
-        source_record_df['type'] = SourceType.STANDARD_CHERENKOV.value
+        source_record_df['type'] = SourceType.CHERENKOV.value
 
         return Sources(df=source_record_df)
 

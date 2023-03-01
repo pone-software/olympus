@@ -769,9 +769,9 @@ class NormalFlowPhotonPropagator(
 
         for record in records.df.itertuples():
             record_id = getattr(record, 'record_id')
-            hits_records = collection.get_hits(record_id=record_id)
+            hits_records = collection.get_hits(record_ids=record_id)
 
-            source_records = collection.get_sources(record_id=record_id)
+            source_records = collection.get_sources(record_ids=record_id)
             if source_records is None:
                 logging.info(
                     'No sources for record {}. Skipping!'.format(record_id)
