@@ -7,7 +7,7 @@ import numpy as np
 from ananke.models.collection import Collection
 from ananke.models.detector import Detector
 from ananke.models.event import Sources, Hits, Records
-from ananke.schemas.event import EventTypes
+from ananke.schemas.event import Types
 from olympus.configuration.photon_propagation import PhotonPropagatorConfiguration
 from olympus.event_generation.medium import Medium
 
@@ -44,8 +44,8 @@ class AbstractPhotonPropagator(ABC, Generic[_PhotonPropagatorConfiguration]):
             collection: Collection,
             record_type: Optional[
                 Union[
-                    List[EventTypes],
-                    EventTypes
+                    List[Types],
+                    Types
                 ]
             ] = None,
             **kwargs

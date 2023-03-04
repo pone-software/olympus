@@ -2,7 +2,7 @@ from enum import Enum
 
 import numpy.typing as npt
 
-from hyperion.constants import Constants
+from olympus.constants import Constants
 from hyperion.medium import medium_collections
 
 
@@ -68,4 +68,4 @@ class Medium:
         Returns:
             light speed as scalar or array depending on input.
         """
-        return Constants.BaseConstants.c_vac / self.get_refractive_index(wavelengths)
+        return Constants.c_vac / self.get_refractive_index(wavelengths)

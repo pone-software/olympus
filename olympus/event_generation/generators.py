@@ -91,7 +91,8 @@ def generate_hit_per_file(
             module_hits_df['module_id'] = getattr(indices, 'module_id')
             module_hits_df['record_id'] = record_id
             module_hits_df['type'] = record_type.value
-            module_hits_df['time'] = module_hits_df['time'] - pick_start_time + start_time
+            module_hits_df['time'] = module_hits_df[
+                                         'time'] - pick_start_time + start_time
 
             module_hits = Hits(
                 df=module_hits_df[[
@@ -154,7 +155,7 @@ class EventGenerator(AbstractGenerator[EventGeneratorConfiguration, EventType]):
         orientations = Vectors3D.from_numpy(
             sample_direction(n_samples=number_of_samples, rng=self.rng)
         )
-        ids = self._get_record_ids(number_of_samples)
+        ids = collection.storage.get_next_record_ids(number_of_samples)
         event_records_df = pd.concat(
             [
                 locations.get_df_with_prefix('location_'),
@@ -292,7 +293,7 @@ class NoiseGenerator(AbstractGenerator[NoiseGeneratorConfiguration, NoiseType], 
             collection: collection to generate for
             number_of_samples: Amount of samples to be generated
         """
-        ids = self._get_record_ids(number_of_samples)
+        ids = collection.storage.get_next_record_ids(number_of_samples)
 
         noise_records_df = pd.DataFrame(
             {
@@ -475,8 +476,8 @@ class JuliaBioluminescenceGenerator(NoiseGenerator):
             for idx in range(0, number_of_records, batch_size):
                 with Pool() as pool:
                     result = pool.starmap(
-                            generate_hit_per_file,
-                            multiprocessing_args[idx:idx + batch_size]
+                        generate_hit_per_file,
+                        multiprocessing_args[idx:idx + batch_size]
                     )
                     result_hits = Hits.concat(result)
                     if result_hits is not None:

@@ -11,7 +11,7 @@ import numpy as np
 
 from ananke.models.collection import Collection
 from ananke.models.event import Sources, Hits, Records
-from ananke.schemas.event import EventTypes
+from ananke.schemas.event import Types
 from hyperion.models.photon_arrival_time_nflow.net import (
     make_counts_net_fn,
     make_shape_conditioner_fn,
@@ -748,8 +748,8 @@ class NormalFlowPhotonPropagator(
             collection: Collection,
             record_type: Optional[
                 Union[
-                    List[EventTypes],
-                    EventTypes
+                    List[Types],
+                    Types
                 ]
             ] = None,
             **kwargs

@@ -1,16 +1,13 @@
 """Modula containing the interface for generators."""
 import logging
-import os
-import uuid
 from abc import ABC, abstractmethod
-from typing import List, TypeVar, Generic
+from typing import TypeVar, Generic
 
 import numpy as np
 
 from ananke.models.detector import Detector
 from ananke.models.collection import Collection
 from ananke.schemas.event import RecordType
-from ananke.utils import get_64_bit_signed_uuid_int
 from olympus.configuration.generators import GeneratorConfiguration
 
 _GeneratorConfiguration = TypeVar(
@@ -72,7 +69,7 @@ class AbstractGenerator(ABC, Generic[_GeneratorConfiguration, _GeneratorRecordTy
             append=append
         )
         if recompress:
-            collection.recompress()
+            collection.storage.optimize()
 
     def _generate(
             self,
@@ -182,21 +179,3 @@ class AbstractGenerator(ABC, Generic[_GeneratorConfiguration, _GeneratorRecordTy
             collection: collection to generate for
         """
         pass
-
-    def _get_record_ids(self, number_of_samples: int) -> List[int]:
-        """Generates record uuid1 integer ids for generated objects.
-
-        Args:
-            number_of_samples: Amount of record ids
-
-        Returns:
-            List of integer ids.
-        """
-        if self.configuration.fix_uuids:
-            clock = self.configuration.seed
-        else:
-            clock = None
-        return [
-            get_64_bit_signed_uuid_int(clock=clock)
-            for x in range(number_of_samples)
-        ]

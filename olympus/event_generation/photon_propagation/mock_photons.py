@@ -15,7 +15,7 @@ from tqdm import tqdm
 from ananke.models.collection import Collection
 from ananke.models.detector import Detector
 from ananke.models.event import Hits, EventRecords
-from ananke.schemas.event import EventTypes
+from ananke.schemas.event import Types
 from olympus.configuration.photon_propagation import MockPhotonPropagatorConfiguration
 from olympus.event_generation.lightyield import fennel_angle_distribution_function
 from olympus.event_generation.medium import Medium
@@ -479,8 +479,8 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
             collection: Collection,
             record_type: Optional[
                 Union[
-                    List[EventTypes],
-                    EventTypes
+                    List[Types],
+                    Types
                 ]
             ] = None,
             use_multiprocessing: bool = False,

@@ -14,17 +14,6 @@ config["general"]["jax"] = True
 fennel_instance = Fennel()
 
 
-def simple_cascade_light_yield(energy, *args):
-    """
-    Approximation for cascade light yield.
-
-    Parameters:
-        energy: float
-            Particle energy in GeV
-    """
-    photons_per_GeV = 5.3 * 250 * 1e2
-
-    return energy * photons_per_GeV
 
 
 def fennel_angle_distribution_function(energy: float, particle_id: int) -> Callable:

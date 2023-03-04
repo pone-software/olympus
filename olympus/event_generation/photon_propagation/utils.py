@@ -4,7 +4,6 @@ import numpy as np
 from typing import Optional, Union, Iterable
 import pandas as pd
 
-from ..photon_source import PhotonSource, PhotonSourceType
 from functools import partial
 from time import time
 
@@ -131,36 +130,6 @@ sources_to_model_input_per_module = vmap(
     source_to_model_input_per_module, in_axes=(None, 0, 0, 0, None)
 )
 
-
-def sources_to_array(sources):
-    source_pos = np.empty((len(sources), 3))
-    source_dir = np.empty((len(sources), 3))
-    source_time = np.empty((len(sources), 1))
-    source_photons = np.empty((len(sources), 1))
-
-    for i, source in enumerate(sources):
-        if source.type != PhotonSourceType.STANDARD_CHERENKOV:
-            raise ValueError(
-                f"Only Cherenkov-like sources are supported. Got {source.type}."
-            )
-        source_pos[i] = source.position
-        source_dir[i] = source.direction
-        source_time[i] = source.time
-        source_photons[i] = source.n_photons
-    return source_pos, source_dir, source_time, source_photons
-
-
-def source_array_to_sources(source_pos, source_dir, source_time, source_nphotons):
-    sources = []
-    for i in range(source_pos.shape[0]):
-        source = PhotonSource(
-            np.asarray(source_pos[i]),
-            np.asarray(source_nphotons[i]),
-            np.asarray(source_time[i]),
-            np.asarray(source_dir[i]),
-        )
-        sources.append(source)
-    return sources
 
 
 class Prior(object):
