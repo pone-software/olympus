@@ -174,7 +174,7 @@ class EventGenerator(AbstractGenerator[EventGeneratorConfiguration, EventType]):
         event_records = EventRecords(df=event_records_df)
         logging.info('Finished to generating {} records'.format(number_of_samples))
 
-        collection.set_records(event_records, append=True)
+        collection.storage.set_records(event_records, append=True)
 
     def generate_sources(
             self,
@@ -185,15 +185,21 @@ class EventGenerator(AbstractGenerator[EventGeneratorConfiguration, EventType]):
         Args:
             collection: collection to generate for
         """
-        record_without_sources = collection.get_records_with_sources(
-            record_type=self.record_type,
+        record_ids_with_sources = collection.storage.get_record_ids_with_sources(
+            types=self.record_type
+        )
+        records = collection.storage.get_records(
+            types=self.record_type
+        )
+        records_without_sources = records.get_by_record_ids(
+            record_ids=record_ids_with_sources,
             invert=True
         )
-        if record_without_sources is None:
+        if records_without_sources is None:
             raise ValueError('No records to generate sources')
-        event_records = EventRecords(df=record_without_sources.df)
+        event_records = EventRecords(df=records_without_sources.df)
         sources = self.propagator.propagate(records=event_records)
-        collection.set_sources(sources)
+        collection.storage.set_sources(sources)
 
     def generate_hits(
             self,
@@ -307,7 +313,7 @@ class NoiseGenerator(AbstractGenerator[NoiseGeneratorConfiguration, NoiseType], 
 
         noise_records = NoiseRecords(df=noise_records_df)
 
-        collection.set_records(records=noise_records, append=True)
+        collection.storage.set_records(records=noise_records, append=True)
 
 
 class ElectronicNoiseGenerator(NoiseGenerator):
@@ -323,10 +329,11 @@ class ElectronicNoiseGenerator(NoiseGenerator):
             collection: collection to generate for
         """
         noise_rates = self.detector.pmt_noise_rates
-        records = collection.get_records_with_hits(
-            record_type=self.record_type,
-            invert=True
+        record_ids_with_hits = collection.storage.get_record_ids_with_hits()
+        records = collection.storage.get_records(
+            types=self.record_type,
         )
+        records = records.get_by_record_ids(record_ids_with_hits, invert=True)
         if records is None:
             raise ValueError('No records to generate hits')
         number_of_records = len(records)
@@ -379,7 +386,7 @@ class ElectronicNoiseGenerator(NoiseGenerator):
 
         hits = Hits(df=hits_df)
 
-        collection.set_hits(hits=hits)
+        collection.storage.set_hits(hits=hits)
 
 
 class JuliaBioluminescenceGenerator(NoiseGenerator):
@@ -448,10 +455,11 @@ class JuliaBioluminescenceGenerator(NoiseGenerator):
             collection: collection to generate for
         """
         logging.info('Starting to generate {} hits'.format(self.record_type))
-        records = collection.get_records_with_hits(
-            record_type=self.record_type,
-            invert=True
+        record_ids_with_hits = collection.storage.get_record_ids_with_hits()
+        records = collection.storage.get_records(
+            types=self.record_type,
         )
+        records = records.get_by_record_ids(record_ids_with_hits, invert=True)
         number_of_records = len(records)
         string_module_indices = self.detector.df[self.detector.id_columns[0:2]]
         string_module_indices.drop_duplicates(inplace=True)
@@ -481,17 +489,17 @@ class JuliaBioluminescenceGenerator(NoiseGenerator):
                     )
                     result_hits = Hits.concat(result)
                     if result_hits is not None:
-                        collection.set_hits(hits=result_hits)
+                        collection.storage.set_hits(hits=result_hits)
                 pbar.update()
             # logging.info('Starting to generate {} hits'.format(self.record_type))
 
 
 generators: Dict[Any, Type[AbstractGenerator]] = {
-    EventType.REALISTIC_TRACK: TrackEventGenerator,
-    EventType.STARTING_TRACK: StartingTrackEventGenerator,
-    EventType.CASCADE: CascadeEventGenerator,
-    NoiseType.ELECTRICAL: ElectronicNoiseGenerator,
-    NoiseType.BIOLUMINESCENCE: JuliaBioluminescenceGenerator,
+    RecordType.REALISTIC_TRACK.value: TrackEventGenerator,
+    RecordType.STARTING_TRACK.value: StartingTrackEventGenerator,
+    RecordType.CASCADE.value: CascadeEventGenerator,
+    RecordType.ELECTRICAL.value: ElectronicNoiseGenerator,
+    RecordType.BIOLUMINESCENCE.value: JuliaBioluminescenceGenerator,
 }
 
 
@@ -500,15 +508,15 @@ def get_generator(
         configuration: GeneratorConfiguration
 ) -> AbstractGenerator:
     try:
-        generator_class: Type[AbstractGenerator] = generators[configuration.type]
+        generator_class: Type[AbstractGenerator] = generators[configuration.type.value]
     except:
         raise ValueError(
-            '{} is not a valid generator type.'.format(configuration.type)
+            '{} is not a valid generator type.'.format(configuration.type.value)
         )
 
     # TODO: Investigate potential side effects of "all records"
     return generator_class(
-        record_type=RecordType(configuration.type),
+        record_type=RecordType(configuration.type.value),
         detector=detector,
         configuration=configuration
     )
@@ -516,33 +524,27 @@ def get_generator(
 
 def generate(
         configuration: Optional[DatasetConfiguration] = None,
-        configuration_path: Optional[Union[str, bytes, os.PathLike]] = None,
         detector: Optional[Detector] = None,
 ) -> Collection:
     def _local_save_configuration() -> None:
         """Saves current configuration."""
-        save_configuration(configuration_path, configuration)
+        # save_configuration(configuration_path, configuration)
+        # TODO: Reimplement Configuration Save
+        pass
 
-    os.makedirs(configuration.data_path, exist_ok=True)
-    configuration_path = os.path.join(configuration.data_path, 'configuration.json')
+    collection = Collection(configuration.storage)
 
-    if configuration is None:
-        configuration = DatasetConfiguration.parse_file(configuration_path)
-    else:
-        _local_save_configuration()
-    data_path = os.path.join(configuration.data_path, 'data.h5')
-
-    collection = Collection(data_path)
+    collection.storage.open()
 
     if detector is None:
         detector_service = DetectorBuilderService()
         detector = detector_service.get(configuration=configuration.detector)
 
-    if collection.get_detector() is None:
-        collection.set_detector(detector)
+    if collection.storage.get_detector() is None:
+        collection.storage.set_detector(detector)
     else:
-        collection_detector = collection.get_detector()
-        if not collection_detector.df.equals(detector.df):
+        collection_detector = collection.storage.get_detector()
+        if not collection_detector == detector:
             raise ValueError('Cannot generate on top of different detector')
 
     if configuration.status.value == DatasetStatus.NOT_STARTED:
@@ -584,5 +586,7 @@ def generate(
 
     configuration.status.value = DatasetStatus.COMPLETE
     _local_save_configuration()
+
+    collection.close()
 
     return collection

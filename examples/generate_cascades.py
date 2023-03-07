@@ -14,7 +14,10 @@ from olympus.configuration.generators import GenerationConfiguration
 from olympus.event_generation.medium import MediumEstimationVariant
 from olympus.configuration.generators import UniformSpectrumConfiguration
 from ananke.schemas.event import EventType
-from olympus.configuration.photon_propagation import MockPhotonPropagatorConfiguration
+from olympus.configuration.photon_propagation import (
+    MockPhotonPropagatorConfiguration,
+    NormalFlowPhotonPropagatorConfiguration,
+)
 from olympus.configuration.generators import DatasetConfiguration
 
 from ananke.configurations.presets.detector import single_line_configuration
@@ -35,7 +38,7 @@ configuration = DatasetConfiguration(
     generators=[
         GenerationConfiguration(
             generator=EventGeneratorConfiguration(
-                type=EventType.REALISTIC_TRACK,
+                type=EventType.CASCADE,
                 spectrum=UniformSpectrumConfiguration(
                     log_minimal_energy=2.0,
                     log_maximal_energy=5.5
@@ -46,7 +49,7 @@ configuration = DatasetConfiguration(
         )
     ],
     storage=HDF5StorageConfiguration(
-        data_path='data/realistic_track_10.h5',
+        data_path='data/cascades_10_mock.h5',
         read_only=False
     )
 )
@@ -54,5 +57,5 @@ configuration = DatasetConfiguration(
 collection = generate(configuration)
 
 collection.open()
-collection.storage.get_records()
+collection.storage.get_records().df.head()
 collection.close()

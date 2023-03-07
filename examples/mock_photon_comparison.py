@@ -75,8 +75,8 @@ mock_photon_propagator = MockPhotonPropagator(
 )
 
 normal_photon_propagator_configuration = NormalFlowPhotonPropagatorConfiguration(
-    shape_model_path="../../hyperion/data/photon_arrival_time_nflow_params.pickle",
-    counts_model_path="../../hyperion/data/photon_arrival_time_counts_params.pickle"
+    shape_model_path="../../hyperion/data/normal_flow_shape_model.pickle",
+    counts_model_path="../../hyperion/data/normal_flow_counts_model.pickle"
 )
 
 normal_photon_propagator = NormalFlowPhotonPropagator(

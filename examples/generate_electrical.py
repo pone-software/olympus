@@ -1,3 +1,4 @@
+from ananke.configurations.collection import HDF5StorageConfiguration
 from ananke.configurations.presets.detector import single_line_configuration
 from ananke.schemas.event import NoiseType
 from olympus.configuration.generators import (
@@ -19,10 +20,16 @@ dataset_configuration = DatasetConfiguration(
     generators=[
         GenerationConfiguration(
             generator=noise_generator_config,
-            number_of_samples=100000
+            number_of_samples=10
         ),
     ],
-    data_path='data/noise_generation/electrical_noise_100000'
+    storage=HDF5StorageConfiguration(
+        data_path='data/electrical_noise_10.h5',
+        read_only=False
+    )
 )
 
 mock_collection = generate(dataset_configuration)
+
+mock_collection.open()
+mock_collection.storage.get_detector()

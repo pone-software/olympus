@@ -91,11 +91,11 @@ class AbstractGenerator(ABC, Generic[_GeneratorConfiguration, _GeneratorRecordTy
         # get valid number of current samples
         if drop_empty_records:
             collection.drop_no_hit_records()
-        current_records = collection.get_records()
+        current_records = collection.storage.get_records()
         if current_records is None:
             current_samples = 0
         else:
-            current_samples = len(collection.get_records())
+            current_samples = len(current_records)
         del current_records
 
         # get number of samples to add depending on first call

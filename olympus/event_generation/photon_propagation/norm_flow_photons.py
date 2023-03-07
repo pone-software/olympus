@@ -8,9 +8,11 @@ import jax
 import jax.numpy as jnp
 import pandas as pd
 import numpy as np
+from jax import random
+from tqdm import tqdm
 
 from ananke.models.collection import Collection
-from ananke.models.event import Sources, Hits, Records
+from ananke.models.event import Hits
 from ananke.schemas.event import Types
 from hyperion.models.photon_arrival_time_nflow.net import (
     make_counts_net_fn,
@@ -19,8 +21,6 @@ from hyperion.models.photon_arrival_time_nflow.net import (
     traf_dist_builder,
     eval_log_prob,
 )
-from jax import random
-
 from .interface import AbstractPhotonPropagator
 from .utils import sources_to_model_input, sources_to_model_input_per_module, bucket_fn
 from ...configuration.photon_propagation import NormalFlowPhotonPropagatorConfiguration
@@ -763,49 +763,56 @@ class NormalFlowPhotonPropagator(
         detector_indices = self.detector.indices
         number_pmts = len(detector_indices.index)
         number_pmts_range = range(number_pmts)
-        records = collection.get_records_with_hits(record_type=record_type, invert=True)
+        record_ids_with_hits = collection.storage.get_record_ids_with_hits()
+        record_ids_with_sources = collection.storage.get_record_ids_with_sources()
+        records = collection.storage.get_records()
+        records = records.get_by_record_ids(record_ids_with_hits, invert=True)
+        if records is not None:
+            records = records.get_by_record_ids(record_ids_with_sources)
         if records is None:
             raise ValueError('No records to propagate')
 
-        for record in records.df.itertuples():
-            record_id = getattr(record, 'record_id')
-            hits_records = collection.get_hits(record_ids=record_id)
+        with tqdm(total=len(records)) as pbar:
+            for record in records.itertuples(index=False):
+                record_id = getattr(record, 'record_id')
 
-            source_records = collection.get_sources(record_ids=record_id)
-            if source_records is None:
-                logging.info(
-                    'No sources for record {}. Skipping!'.format(record_id)
-                )
-                continue
-            hits = self.generate_norm_flow_photons(
-                self.detector.module_locations.to_numpy(dtype=np.float32),
-                self.detector.pmt_efficiencies.to_numpy(dtype=np.float32),
-                source_records.locations.to_numpy(dtype=np.float32),
-                source_records.orientations.to_numpy(dtype=np.float32),
-                np.expand_dims(source_records.times.to_numpy(dtype=np.float32), axis=1),
-                np.expand_dims(
-                    source_records.number_of_photons.to_numpy(dtype=np.float32),
-                    axis=1
-                ),
-                self.seed
-            )
-            if len(hits) == 0:
-                continue
-            pmt_hits = []
-            for x in number_pmts_range:
-                if len(hits[x]) == 0:
+                source_records = collection.storage.get_sources(record_ids=record_id)
+                if source_records is None:
+                    logging.info(
+                        'No sources for record {}. Skipping!'.format(record_id)
+                    )
                     continue
-                current_indices = detector_indices.iloc[x]
-                hits_df = pd.DataFrame(
-                    {
-                        'time': hits[x],
-                        'string_id': current_indices.string_id,
-                        'module_id': current_indices.module_id,
-                        'pmt_id': current_indices.pmt_id,
-                        'record_id': record_id,
-                        'type': getattr(record, 'type'),
-                    }
+                hits = self.generate_norm_flow_photons(
+                    self.detector.module_locations.to_numpy(dtype=np.float32),
+                    self.detector.pmt_efficiencies.to_numpy(dtype=np.float32),
+                    source_records.locations.to_numpy(dtype=np.float32),
+                    source_records.orientations.to_numpy(dtype=np.float32),
+                    np.expand_dims(source_records.times.to_numpy(dtype=np.float32), axis=1),
+                    np.expand_dims(
+                        source_records.number_of_photons.to_numpy(dtype=np.float32),
+                        axis=1
+                    ),
+                    self.seed
                 )
-                pmt_hits.append(Hits(df=hits_df))
-            record_hits = Hits.concat(pmt_hits)
-            collection.set_hits(record_hits)
+                if len(hits) == 0:
+                    continue
+                pmt_hits = []
+                for x in number_pmts_range:
+                    if len(hits[x]) == 0:
+                        continue
+                    current_indices = detector_indices.iloc[x]
+                    hits_df = pd.DataFrame(
+                        {
+                            'time': hits[x],
+                            'string_id': current_indices.string_id,
+                            'module_id': current_indices.module_id,
+                            'pmt_id': current_indices.pmt_id,
+                            'record_id': record_id,
+                            'type': getattr(record, 'type'),
+                        }
+                    )
+                    pmt_hits.append(Hits(df=hits_df))
+                record_hits = Hits.concat(pmt_hits)
+                collection.storage.set_hits(record_hits)
+
+                pbar.update()

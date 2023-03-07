@@ -1,24 +1,20 @@
 """Module containing code for mock photon source propagation."""
 from multiprocessing import Pool
 from typing import Union, Tuple, Optional, List
-
 import math
+import logging
 
 import numpy as np
 import numpy.typing as npt
 import jax.numpy as jnp
 import pandas as pd
-import logging
-
 from tqdm import tqdm
 
 from ananke.models.collection import Collection
-from ananke.models.detector import Detector
-from ananke.models.event import Hits, EventRecords
+from ananke.models.event import Hits
 from ananke.schemas.event import Types
 from olympus.configuration.photon_propagation import MockPhotonPropagatorConfiguration
 from olympus.event_generation.lightyield import fennel_angle_distribution_function
-from olympus.event_generation.medium import Medium
 from olympus.event_generation.photon_propagation.interface import \
     AbstractPhotonPropagator
 
@@ -483,7 +479,7 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
                     Types
                 ]
             ] = None,
-            use_multiprocessing: bool = False,
+            use_multiprocessing: bool = True,
             **kwargs
     ) -> None:
         """Propagates a given collection.
@@ -491,12 +487,14 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
         Args:
             collection: collection to be propagated
             record_type: type of records to propagate
-            use_multiprocessing:
-
-        Returns:
-
+            use_multiprocessing: whether multiprocessing should be used
         """
-        records = collection.get_records_with_hits(record_type=record_type, invert=True)
+        record_ids_with_hits = collection.storage.get_record_ids_with_hits()
+        record_ids_with_sources = collection.storage.get_record_ids_with_sources()
+        records = collection.storage.get_records()
+        records = records.get_by_record_ids(record_ids_with_hits, invert=True)
+        if records is not None:
+            records = records.get_by_record_ids(record_ids_with_sources)
         if records is None:
             raise ValueError('No records to propagate')
         number_of_records = len(records)
@@ -509,7 +507,7 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
         number_of_pmts = self.detector.number_of_pmts
 
         with tqdm(total=number_of_records) as pbar:
-            for record_index, record in enumerate(records.df.itertuples()):
+            for record_index, record in enumerate(records.itertuples(index=False)):
                 try:
                     logging.info(
                         'Starting with record {} of {} records.'.format(
@@ -521,7 +519,9 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
                     record_type = getattr(record, 'type')
                     record_energy = getattr(record, 'energy')
                     record_particle_id = getattr(record, 'particle_id')
-                    record_sources = collection.get_sources(record_id)
+                    record_sources = collection.storage.get_sources(
+                        record_ids=record_id
+                    )
                     if record_sources is None:
                         logging.info(
                             'No sources for record {}. Skipping!'.format(
@@ -537,10 +537,14 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
                     source_locations = record_sources.locations.to_numpy(np.float32)
                     source_locations = jnp.array(source_locations)
 
-                    source_orientations = record_sources.orientations.to_numpy(np.float32)
+                    source_orientations = record_sources.orientations.to_numpy(
+                        np.float32
+                    )
                     source_orientations = jnp.array(source_orientations)
 
-                    source_photons = record_sources.number_of_photons.to_numpy(np.float32)
+                    source_photons = record_sources.number_of_photons.to_numpy(
+                        np.float32
+                    )
                     source_photons = jnp.array(source_photons)
 
                     source_times = record_sources.times.to_numpy(np.float32)
@@ -579,7 +583,10 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
                     # 4. Calculate Number of Photons
                     total_yield = jnp.multiply(angular_yield, distance_yield)
                     jnp.einsum('ij,i->ij', total_yield, efficiency_yield)
-                    photons_per_pmt_per_source = jnp.multiply(total_yield, source_photons.T)
+                    photons_per_pmt_per_source = jnp.multiply(
+                        total_yield,
+                        source_photons.T
+                    )
                     photons_per_pmt_per_source = jnp.rint(
                         photons_per_pmt_per_source
                     ).astype(
@@ -610,20 +617,19 @@ class MockPhotonPropagator(AbstractPhotonPropagator[MockPhotonPropagatorConfigur
                                 )
                             )
 
-                    # if not use_multiprocessing:
-                    #     for args in multiprocessing_args:
-                    #         hits_list.append(photons_per_pmt_to_hits(*args))
-                    # else:
-                    with Pool() as pool:
-                        hits_list += pool.starmap(
-                            photons_per_pmt_to_hits,
-                            multiprocessing_args
-                        )
+                    if not use_multiprocessing:
+                        for args in multiprocessing_args:
+                            hits_list.append(photons_per_pmt_to_hits(*args))
+                    else:
+                        with Pool() as pool:
+                            hits_list += pool.starmap(
+                                photons_per_pmt_to_hits,
+                                multiprocessing_args
+                            )
 
-                    # TODO: Better handling of Empty Hits
                     record_hits = Hits.concat(hits_list)
                     if record_hits is not None:
-                        collection.set_hits(record_hits)
+                        collection.storage.set_hits(record_hits)
                 except RuntimeError:
                     logging.warning('Tried to allocate to much GPU memory.')
                 pbar.update()

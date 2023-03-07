@@ -9,6 +9,7 @@ from pydantic import (
     validator, NonNegativeInt,
 )
 
+from ananke.configurations.collection import StorageConfiguration
 from ananke.configurations.detector import DetectorConfiguration
 from ananke.schemas.event import EventType, NoiseType
 from .photon_propagation import (
@@ -25,7 +26,7 @@ class GeneratorConfiguration(BaseModel):
     seed: int = defaults['seed']
 
     #: type of the configuration
-    type: str
+    type: int
 
     #: For debugging, it might be useful to have similar UUIDs all the time
     fix_uuids: bool = False
@@ -175,7 +176,7 @@ class DatasetConfiguration(BaseModel):
     generators: List[GenerationConfiguration]
 
     #: Path for the generated data to be
-    data_path: str
+    storage: StorageConfiguration
 
     status: DatasetStatusConfiguration = Field(
         default_factory=lambda: DatasetStatusConfiguration()
