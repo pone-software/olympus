@@ -571,7 +571,8 @@ def generate(
             generator.generate(
                 collection,
                 number_of_samples=generator_config.number_of_samples,
-                drop_empty_records=generator_config.drop_empty_records
+                drop_empty_records=generator_config.drop_empty_records,
+                append=generator_config.append
             )
             configuration.status.current_index = index + 1
             _local_save_configuration()
