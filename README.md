@@ -15,8 +15,8 @@ This package has been optimised for python 3.10.
 The package can be installed without prior steps using your package manager.
 
 ```console
-foo@bar:project/$ poetry add git+https://github.com/pone-software/olympus.git@new_main
-foo@bar:project/$ pip install git+https://github.com/pone-software/olympus.git@new_main
+foo@bar:project/$ poetry add git+https://github.com/pone-software/olympus.git@main
+foo@bar:project/$ pip install git+https://github.com/pone-software/olympus.git@main
 ```
 
 ### Development Installation
